@@ -18,7 +18,7 @@ acquire:                   # C1; the import configuration (manual call codes, ov
 convert:                   # C2
   converter: pymupdf4llm   # with its layout model; chosen by the comparison (DEC-30)
   ocr_min_chars_per_page: 500
-  workers: 4               # each worker loads the layout model; 4 fit in 16 GB
+  workers: 1               # the layout model already uses every core: 1 worker gave 1.65 pages/s, 4 workers 1.15
   comparison_sample:       # SPEC-C2-11; mostly gold documents
     - {label: "Plusz call with many tables", name: dimop-plusz-126-24, doc_id: 95f2719354f4b21c}
     - {label: "old-generation TOP call", name: top-431-16, doc_id: 317b2dea1b0ba7e0}
