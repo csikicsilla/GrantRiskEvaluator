@@ -55,6 +55,11 @@ consolidate:               # L2
 label:                     # L3
   low_coverage_threshold: 5
 
+validate:                  # E1; the corpus LLM of SPEC-E1-06 is extract.llm.model
+  old_baseline: ../20_GrantRiskEstimator/data/Gold_second_test_results_final.csv  # old regex points (column regex), SPEC-E1-02
+  old_baseline_renamed:    # calls renamed in the gold file since the baseline was recorded: old name → current name
+    "GINOP Plusz-2.2.1-24": "GINOP Plusz-2.2.1-25"
+
 represent:                 # M1
   representations: [tfidf, hubert, e5, bge_m3, qwen3_8b]
   tfidf:                   # SPEC-M1-05; fitted inside each training fold by M2
