@@ -1,0 +1,4 @@
+# Keep the gold fixture byte-identical (UTF-8 with BOM, CRLF, ';'-separated).
+*.csv -text
+# The prompt is sent byte for byte (SPEC-L1-07).
+prompts/*.txt -text

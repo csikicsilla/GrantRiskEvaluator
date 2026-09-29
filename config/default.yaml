@@ -1,0 +1,54 @@
+# Grant Risk Estimator: default configuration (ARC-03).
+# Relative paths are resolved against the repository root.
+# Secrets never go here; they come from environment variables (.env, ARC-08).
+
+data_root: data            # database and file store (DEC-22); not under version control
+
+# Read-only inputs from the old code line (DEC-23). Nothing here is ever modified.
+sources:
+  scraped_pdfs: ../20_GrantRiskEstimator/data/raw_pdfs
+  scrape_log: ../20_GrantRiskEstimator/data/scrape_log.csv
+  old_database: ../20_GrantRiskEstimator/data/palyazat.db
+  manual_zip: ../00_Archívum/Pipeline_V0/Pipeline_V0.zip
+  gold_csv: ../20_GrantRiskEstimator/data/Gold_second.csv
+
+acquire:                   # C1; the import configuration (manual call codes, overrides, gold pins) comes with C1
+  import_config: config/import.yaml
+
+convert:                   # C2
+  converter: null          # chosen on Wednesday (DEC-30)
+  ocr_min_chars_per_page: 500
+  workers: 8
+
+extract:                   # L1
+  llm:
+    prompt: prompts/P5_system_prompt.txt
+    model: claude-haiku-4-5-20251001
+    temperature: 0
+    max_parallel_requests: 4
+    budget_usd: null       # a run over the corpus needs a ceiling
+    prices_per_mtok:       # copied from the provider's price list, never hard-coded
+      input: null
+      output: null
+
+consolidate:               # L2
+  preferred_source: {}     # per factor, filled from the E1 report (SPEC-L2-03)
+
+label:                     # L3
+  low_coverage_threshold: 5
+
+represent:                 # M1
+  representations: [tfidf, hubert, e5, bge_m3, qwen3_8b]
+  tfidf:
+    ngram_range: [1, 2]
+    min_df: 2
+    max_df: 0.9
+    sublinear_tf: true
+    max_features: 200000
+
+train:                     # M2
+  classifiers: [logreg, svm, rf, majority]
+  cv:
+    n_splits: 5
+    n_repeats: 5
+    random_state: 42

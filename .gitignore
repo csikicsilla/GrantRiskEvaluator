@@ -1,0 +1,14 @@
+# Data root (DEC-22): database, PDFs, Markdown, embeddings, LLM responses, reports
+/data/
+
+# Secrets (ARC-08)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
