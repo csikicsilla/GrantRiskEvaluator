@@ -50,8 +50,15 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("--workers", type=int, help="parallel worker processes (default: convert.workers)")
 
     extract = stage_parsers["extract"]
-    extract.add_argument("--extractor", required=True, choices=["manual"], help="the extractor to run (regex and llm follow)")
-    extract.add_argument("--c1-run", required=True, help="the C1 run that holds the corpus")
+    extract.add_argument("--extractor", required=True, choices=["manual", "llm"], help="the extractor to run")
+    extract.add_argument("--c1-run", help="manual: the C1 run that holds the corpus")
+    extract.add_argument("--c2-run", help="llm: the C2 run whose texts are read")
+    extract.add_argument("--model", help="llm: a model other than extract.llm.model")
+    extract.add_argument("--gold-only", action="store_true", help="llm: only the gold documents (SPEC-L1-14)")
+    extract.add_argument("--estimate", action="store_true", help="llm: print the cost estimate and stop (SPEC-L1-11)")
+    extract.add_argument("--confirm", action="store_true", help="llm: confirm a run over the whole corpus")
+    extract.add_argument("--resume", help="llm: an unfinished L1 run to continue")
+    extract.add_argument("--reparse", action="store_true", help="llm: parse stored responses only, without the API")
 
     consolidate = stage_parsers["consolidate"]
     consolidate.add_argument("--manual-run", required=True, help="the L1 run of the manual (gold) import")
@@ -80,7 +87,8 @@ def _run_stage(name: str, work) -> int:
             return 1
         finally:
             conn.close()
-        print(run_id)
+        if run_id:
+            print(run_id)
         return 0
 
     return call
@@ -137,9 +145,37 @@ def _extract(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
     from grantrisk.extraction.manual import gold
 
     pins = load_import_config(cfg.resolve(cfg.values["acquire"]["import_config"]))["gold_pins"]
+    if args.extractor == "llm":
+        return _extract_llm(conn, cfg, args, pins)
+    if not args.c1_run:
+        raise ValueError("the manual extractor needs --c1-run")
     return gold.run(
         conn, cfg.values, cfg.data_root, c1_run_id=args.c1_run, gold_csv=cfg.source("gold_csv"),
         gold_pins=pins, gold_set=cfg.values["extract"]["manual"]["gold_set"],
+    )
+
+
+def _extract_llm(conn, cfg: config_mod.Config, args: argparse.Namespace, pins: dict[str, str]) -> str:
+    import json
+
+    from grantrisk.extraction.llm import run as llm
+
+    if not args.c2_run:
+        raise ValueError("the LLM extractor needs --c2-run")
+    settings = llm.settings_from_config(cfg.values, cfg.resolve, args.model)
+    doc_ids = sorted(sha[:16] for sha in pins.values()) if args.gold_only else None
+    client = None
+    if not args.reparse:
+        import anthropic  # the API key comes from the environment, never from the configuration (SPEC-L1-13)
+
+        client = anthropic.Anthropic(max_retries=cfg.values["extract"]["llm"].get("max_retries", 5))
+    if args.estimate:
+        estimate = llm.estimate(client, settings, llm.documents(conn, args.c2_run, doc_ids))
+        print(json.dumps(estimate, indent=2))
+        return None  # an estimate is not a run
+    return llm.run(
+        conn, cfg.values, cfg.data_root, client, settings, c2_run_id=args.c2_run, doc_ids=doc_ids,
+        confirmed=args.confirm, resume_run_id=args.resume, progress=lambda line: print(line, file=sys.stderr, flush=True),
     )
 
 

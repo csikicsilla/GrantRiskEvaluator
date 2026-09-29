@@ -16,6 +16,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+convert = ["pymupdf4llm>=1.28"]   # the C2 converter (DEC-30); docling only for the comparison
+llm = ["anthropic>=1.9"]          # the L1 LLM extractor
 
 [project.scripts]
 grantrisk = "grantrisk.cli:main"
