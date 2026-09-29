@@ -25,7 +25,7 @@ STAGES = [
 EXIT_NOT_IMPLEMENTED = 3
 
 
-IMPLEMENTED = {"label"}
+IMPLEMENTED = {"acquire", "label"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,6 +43,27 @@ def build_parser() -> argparse.ArgumentParser:
     label.add_argument("--l2-run", required=True, help="the L2 run whose consolidated factors are labelled")
     label.add_argument("--c1-run", required=True, help="the C1 run that holds the documents' programmes")
     return parser
+
+
+def _acquire(cfg: config_mod.Config, args: argparse.Namespace) -> int:
+    from grantrisk.corpus import acquire
+    from grantrisk.store import db
+
+    sources = {k: cfg.source(k) for k in ("scraped_pdfs", "scrape_log", "old_database", "manual_zip")}
+    conn = db.connect(cfg.data_root)
+    try:
+        run_id = acquire.run(
+            conn, cfg.values, cfg.data_root, sources, cfg.resolve(cfg.values["acquire"]["import_config"])
+        )
+        n = conn.execute("SELECT COUNT(*) FROM documents WHERE run_id = ?", (run_id,)).fetchone()[0]
+    except ValueError as exc:  # includes ImportConfigError and UnknownProgrammeError
+        print(f"grantrisk acquire: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
+    print(run_id)
+    print(f"{n} documents; see reports/{run_id}/c1_report.json for the review list", file=sys.stderr)
+    return 0
 
 
 def _label(cfg: config_mod.Config, args: argparse.Namespace) -> int:
@@ -64,6 +85,8 @@ def _label(cfg: config_mod.Config, args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     cfg = config_mod.load(args.config)
+    if args.command == "acquire":
+        return _acquire(cfg, args)
     if args.command == "label":
         return _label(cfg, args)
     print(f"grantrisk {args.command}: not implemented yet (data root: {cfg.data_root})", file=sys.stderr)

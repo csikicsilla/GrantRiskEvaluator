@@ -1,0 +1,107 @@
+# C1 import configuration (Spec_C1_Acquire.md §2.1). Reviewed by hand; see DEC-20, DEC-23, DEC-34.
+
+# The call code of each manual PDF in Pipeline_V0.zip (data/raw_pdfs/), as printed on its first page.
+# Seeded on 2026-09-29 from the first-page identifier, the old manual_match_review.csv and the gold set.
+manual_files:
+  "dimop-plusz-123B-24-felhívás.pdf": "DIMOP_PLUSZ-1.2.3/B-24"
+  "dimop-plusz-126-24-felhivas.pdf": "DIMOP_PLUSZ-1.2.6-24"
+  "dimop-plusz-412-23-felhivas.pdf": "DIMOP_PLUSZ-4.1.2-23"
+  "efop-plusz-211-24-felhivas.pdf": "EFOP_PLUSZ-2.1.1-24"
+  "efop-plusz-341-25-vegleges.pdf": "EFOP_PLUSZ-3.4.1-25"
+  "efop-plusz-611-25-felhivas.pdf": "EFOP_PLUSZ-6.1.1-25"
+  "felhivas-dimop-plusz-213-23.pdf": "DIMOP_PLUSZ-2.1.3-23"
+  "ginop-plusz-121-felhivas.pdf": "GINOP_PLUSZ-1.2.1-21"
+  "ginop-plusz-122-22-felhivas.pdf": "GINOP_PLUSZ-1.2.2-22"
+  "ginop-plusz-123-felhivas.pdf": "GINOP_PLUSZ-1.2.3-21"
+  "ginop-plusz-124-25-felhivas.pdf": "GINOP_PLUSZ-1.2.4-25"
+  "ginop-plusz-131-felhivas.pdf": "GINOP_PLUSZ-1.3.1-21"
+  "ginop-plusz-144-24-felhivas-v5.pdf": "GINOP_PLUSZ-1.4.4-24"
+  "ginop-plusz-145-25-felhivas-v3.pdf": "GINOP_PLUSZ-1.4.5-25"
+  "ginop-plusz-211-24-felhivas.pdf": "GINOP_PLUSZ-2.1.1-24"
+  "ginop-plusz-212-22-felhivas.pdf": "GINOP_PLUSZ-2.1.2-22"
+  "ginop-plusz-213-24-felhivas.pdf": "GINOP_PLUSZ-2.1.3-24"
+  "ginop-plusz-214-25-felhivas.pdf": "GINOP_PLUSZ-2.1.4-25"
+  "ginop-plusz-216-25-felhivas.pdf": "GINOP_PLUSZ-2.1.6-25"
+  "ginop-plusz-221-25-felhivas.pdf": "GINOP_PLUSZ-2.2.1-25"
+  "ginop-plusz-251-25-korai-fazisu-kt-felhivas.pdf": "GINOP_PLUSZ-2.5.1-25"
+  "ginop-plusz-252-26-felhivas.pdf": "GINOP_PLUSZ-2.5.2-26"
+  "ginop-plusz-311-23-felhivas.pdf": "GINOP_PLUSZ-3.1.1-23"
+  "ginop-plusz-411-23-felhivas.pdf": "GINOP_PLUSZ-4.1.1-23"
+  "ginop-plusz-511-24-felhivas-vegl.pdf": "GINOP_PLUSZ-5.1.1-24"
+  "ginop-plusz-521-23-felhivas.pdf": "GINOP_PLUSZ-5.2.1-23"
+  "ginop-plusz-525-25-felhivas.pdf": "GINOP_PLUSZ-5.2.5-25"
+  "ginop-plusz-526-25-felhivas.pdf": "GINOP_PLUSZ-5.2.6-25"
+  "ginopplusz-211-21-mod.pdf": "GINOP_PLUSZ-2.1.1-21"
+  "ikop-plusz-110-23.pdf": "IKOP_PLUSZ-1.1.0-23"
+  "ikop-plusz-220-23.pdf": "IKOP_PLUSZ-2.2.0-23"
+  "kehop-plusz-1221-felhivas.pdf": "KEHOP_PLUSZ-1.2.21"
+  "kehop-plusz-423-felhivas.pdf": "KEHOP_PLUSZ-4.2.3-25"
+  "mahop-plusz-131-25-felhivas.pdf": "MAHOP_PLUSZ-1.3.1-2025"
+  "mahop-plusz-251-2025-felhivas.pdf": "MAHOP_PLUSZ-2.5.1-2025"
+  "top-plusz-131-21-TSM.pdf": "TOP_PLUSZ-1.3.1-21"
+  "top-plusz-131-21-felhivas.pdf": "TOP_PLUSZ-1.3.1-21"
+  "top-plusz-412-23-felhivas.pdf": "TOP_PLUSZ-4.1.2-23"
+  "vop-plusz-412-22.pdf": "VOP_PLUSZ-4.1.2-22"
+
+# Document-type overrides for files the rules cannot classify (SPEC-C1-06): doc_id → main_call | product_description | other.
+# Decided by the expert on 2026-09-29 from the first page of each file.
+doc_type_overrides:
+  "81109d613f1ca58f": other        # EFOP-3.2.1-15 efop-321-15-esza-resztvevok-felh-kk.pdf: user manual
+  "032120a0315024ae": other        # GINOP-8.8.1 er-hatalyos-20230822-tol.pdf: procedure rules of the loan programmes
+  "8329f0c09e818b8e": main_call    # KEHOP_PLUSZ-3.1.11-25 kehop-plusz-3111-karment-erfa-20260120.pdf
+  "631924423dd03ef6": main_call    # KEHOP_PLUSZ-3.1.12-25 kehop-plusz-3112-karment-ka-2mod.pdf
+  "b38b0c3fb48073df": main_call    # RRF-3.1.1-22 rrf-311-22-vegleges.pdf: the call, opened by a summary of its amendments
+  "bf4d390996334122": other        # VP-6.1.1-16 szf-0805.pdf: general contract terms (ÁSZF)
+
+# Version overrides for calls whose candidates cannot be ordered (SPEC-C1-07): call code → doc_id of the chosen file.
+# Decided by the expert on 2026-09-29; the evidence was each PDF's own creation date.
+version_overrides:
+  "GINOP-8.2.6-18": "606689e75db30527"        # termekleiras-ginop-826-18-20200611-1.pdf (2020)
+  "GINOP_PLUSZ-2.1.1-24": "3c42930c85e52ab8"  # the scraped copy, made 2026-05-05
+  "GINOP_PLUSZ-2.1.4-25": "92ceea28b9ab4d88"  # the scraped copy, 87 pages, made 2026-05-05
+  "VP-6.4.1-16": "fccd513bd2286618"           # vp6-641-16-felhivas.pdf, 32 pages, 2025-11
+
+# Gold pins (DEC-20, DEC-34): gold call name as in Gold_second.csv → SHA-256 of the document the expert scored.
+gold_pins:
+  "GINOP Plusz-1.2.1-21": 955e2338b034f182bf5ad922632fe1b8d30d83571ed66a9ff89a1eec240dad8e
+  "GINOP Plusz-1.4.4-24": b54c7184210e0163ddb0801c4f53e57385a6664455588ebeb5a5267c5ff2b4ac
+  "GINOP Plusz-2.2.1-25": 195f967a62e753abc278cb21c500d23d9fb1ed2a0e2ebccef73b978d9f30bcc6
+  "GINOP Plusz-3.1.1-23": 261118555e3ffa3b4ff30310021ea301ab81eda1448b700dc4ed8261e1f0d054
+  "GINOP Plusz-5.2.6-25": 1ecf2af55e5b2f0a30fd7baaf0f47b7cffb833350a97c52ff7111d21f30dc1b1
+  "DIMOP Plusz-1.2.3/B-24": 3d390d241c09e25235855bf5efb730d403dd3178c7d2a585cc63c0a9ee70f61c
+  "DIMOP Plusz-1.2.6-24": 95f2719354f4b21c8e198be8f634c43cf1e255ec9d647f03fafad85b502187af
+  "DIMOP Plusz-2.1.2-23": 3358ba60128b6cba082a469a02ccb70572e3e6bbb26784037dcbdbf1c1074c4b
+  "DIMOP Plusz-4.1.2-23": 1a51e60d1f4b8a4f15ea1085726813c804f0dfa680f5ac98ccee0623a258c698
+  "TOP Plusz-4.1.2-23": b593b4b60ccb63ca287db8d66d6dc37d323fb47c46637bf42a938da05e3504aa
+  "EFOP Plusz-2.1.1-24": b0f1914b95c259636b32867f26d779f3afd8a97fe93045b964125bc10920b866
+  "EFOP Plusz-3.4.1 -25": 1afd31375acba1c56870789bee0d78ded320b7b66c6ceb38a0f08f29d3052dc4
+  "EFOP Plusz-6.1.1-25": 32f82b7a2c0b3e292ed2d4a8313bf09a0fc73c9681de3909605d117f4910b7ba
+  "KEHOP Plusz-1.2.21": 1797d6d9645f3c539e17f66900f145711db965611a46e645732c2dd4c188f855
+  "MAHOP Plusz–1.3.1-25": 34726c84882d1b99c38ed6f4e89ac172f16ec4a8210b61f7f8d99552f12c1de0
+  "MAHOP Plusz–2.5.1-25": 354b831fcb4b4c20f408b43ca1277630a8d2fa96f01c05099a1542935b6ac729
+  "IKOP Plusz-1.1.0-23": a44be7fe2dcdf26a442238bdf26685702cd01ff32b4fe0c1862f1419b2a1b89c
+  "IKOP Plusz-2.2.0-23": ae4537d06c32d25325a89e3556c85b013e30973a1286079bf1470de33f5e71aa
+  "VOP Plusz-4.1.2-22": 7118bae0751a8e4b2fc42e92d3b4ad9d8b42ef18604fe2bf0add31e1792647a9
+  "KEHOP-Plusz-4.2.3-25": a6e542e7ecb451722a8fca7eda64564e97dd858b7d64cc877a60b8c56fc41c3b
+  "EFOP-1.2.12-17": 746b9b10cb9c1dfc343b0bea22e0b7aa531048a5ae9e163c1afa7efbfc9acd6a
+  "EFOP–2.2.2–17": 3ee2dd4310e2fe607bd3efb31469a6e83dd98cb8257cce3ef82c1eaf18d70f55
+  "EFOP-3.2.1-15": 3da945a58310937ce73d49286450174db6ac80bc1530776d4c5c882ff097d484
+  "GINOP- 1.1.1-18": f9a8bc76f524ce8906169f6027407f5328b8da2f30b1720d341c466acfc31d27
+  "GINOP-2.1.3-15": c9f45d66f0120d4cb663fc391d5cef933f4fd5225160748cb233906f163dcc7f
+  "GINOP-4.1.2-18": 91e7fbdd532ec420a6cc18004391a32c831f705aed29ab9f9ccd5fdf50d1091d
+  "GINOP-5.3.10-VEKOP-17": 4254c4579cfd8a413dcbe263a0258acc6f815d5582643aebb002e95fe3908456
+  "IKOP-1.1.0-15": c140279fcd1fc92f2726732c12ff201106b46a099002d6a4791d417230650847
+  "IKOP-3.2.0-15": d5e6ef942f4ae5de3ca0c8f29a33c303288d1f3088ae6b11823a7d5e0d46332e
+  "KEHOP-1.5.0.": e744c84aa9cc2a18eb917f96c116fdc9d2b1b20676e5f35aac8795d6a90c106f
+  "KEHOP-3.3.0": 63b593ebd096482139207c5b25910ce52adbd08132e5d762277d3598871abbb5
+  "KEHOP-5.2.5.": 5d3f141598bcfc8cec24258782dfe4876edcb7d397d11006b1f8142ce631b453
+  "KÖFOP-1.2.1-VEKOP-16": ce7d5171bfcdf0325c020cdef06e0513bd629c68d013b45758c4d8bd158d7802
+  "KÖFOP-3.3.2.-16": fb75c9da0062c198bb5ea98457600751690ccdbe90ba053ebecfaac166802cf2
+  "MAHOP-2.5-2017": 7965382d773ad1915a62149514adc02ef61b3c41d9a1340283dbe7e8492db2d5
+  "RRF-1.1.2-2021": acdf0bf199e87a47d7336c867b18e4002731b1ad888095f2538103b7dd0655f7
+  "RRF-6.1.1-21": 33c91e9a9a10f4be623a2ad4bc6b19ecc68cac62394aa8dcb447c66fcb9ff127
+  "TOP-4.3.1-16": 317b2dea1b0ba7e094eb8e027e87b7ad4019a745f2f58516aae95f6da9709026
+  "VEKOP-5.2.1-17": abcc60a4aa00fd55c7e1aa8d4d1d22ab9ccfe7e7c6b1ee5dd905737216d03f74
+  "VP1-1.2.1-23": 6e763bf5b058b1b6c37b8a782fc56ab191a0dc2abaa9d64f6dff18496e3f639f
+  "VP6-7.2.1.1-20": 5bfe8e7220c6ef542dc081ed4ad94cc77ef863c30014472c6fc46ea8e415d1ae
+  "VP-20.3-16": 864c018c36797a3e3ee472cb8b07623d39d39ebcd279e948aa2d98679eff2a70

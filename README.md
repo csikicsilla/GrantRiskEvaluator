@@ -2,7 +2,7 @@
 
 The code line of the thesis *„Mesterséges intelligencián alapuló rendszer fejlesztése pályázati felhívások automatikus feldolgozására, kategorizálására és kockázati értékelésére"*. It labels Hungarian grant calls with a rule-based risk level, and it compares machine-learning models that predict that level from the raw text.
 
-**Status:** skeleton. The stages are specified but not implemented yet; every command reports "not implemented yet".
+**Status:** in progress. Implemented: `acquire` (C1) and `label` (L3), on top of the database with runs and lineage. The other commands report "not implemented yet".
 
 ## Specification
 
