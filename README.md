@@ -2,7 +2,7 @@
 
 The code line of the thesis *„Mesterséges intelligencián alapuló rendszer fejlesztése pályázati felhívások automatikus feldolgozására, kategorizálására és kockázati értékelésére"*. It labels Hungarian grant calls with a rule-based risk level, and it compares machine-learning models that predict that level from the raw text.
 
-**Status:** in progress. Implemented: `acquire` (C1) and `label` (L3), on top of the database with runs and lineage. The other commands report "not implemented yet".
+**Status:** every stage and `run-all` are implemented and tested, on top of the database with runs and lineage. Not yet run on the full corpus: the LLM extractor (never called the real API), M1–E3. The portal client of SPEC-C1-12 (optional) is not implemented.
 
 ## Specification
 
@@ -47,9 +47,11 @@ Python 3.11 or later.
 ```
 python -m venv C:\Users\<you>\.venvs\grantrisk
 C:\Users\<you>\.venvs\grantrisk\Scripts\activate
-pip install -e ".[dev]" pymupdf4llm docling
+pip install -e ".[dev,convert,llm,ml,embed]" docling
 python -m pytest
 ```
+
+The groups: `convert` (C2), `llm` (L1 LLM), `ml` (M1 TF-IDF, M2, E2), `embed` (M1 local embeddings). Docling is needed only for the converter comparison.
 
 Keep the virtual environment on a path with ASCII letters only. Docling's PDF parser (a C++ library) cannot open its own resource files under a path such as `30_Kód`. For the same reason, C2 hands PDFs to Docling as byte streams, not as paths. The converters' models are downloaded on first use; later runs can work offline (`HF_HUB_OFFLINE=1`, SPEC-C2-03).
 
@@ -73,4 +75,28 @@ tools/           helper scripts (coverage of the specification)
 
 ## Reproducing the results
 
-To be written when the stages are implemented (thesis appendix 8.3, INT-OUT-09).
+Each command prints the id of the run it creates; the next command takes it. Every run stores its configuration, code version and input runs, and each E3 report writes the exact commands of its own chain to `appendix/8_3_reproduction.md` (thesis appendix 8.3, INT-OUT-09).
+
+```
+python -m grantrisk acquire                                         # C1 → C1-…
+python -m grantrisk convert --c1-run C1-…                           # C2 → C2-… (hours)
+python -m grantrisk extract --extractor manual --c1-run C1-…        # L1 gold import
+python -m grantrisk extract --extractor regex --c2-run C2-…         # L1 regex
+python -m grantrisk extract --extractor llm --c2-run C2-… --estimate   # L1 LLM: the cost first,
+python -m grantrisk extract --extractor llm --c2-run C2-… --confirm    # then the paid run
+python -m grantrisk validate --manual-run L1-… --l3-run L3-… --c1-run C1-… --extraction-runs L1-…,L1-…   # E1
+python -m grantrisk consolidate --manual-run L1-… --regex-run L1-… --llm-run L1-… --c2-run C2-…        # L2
+python -m grantrisk label --l2-run L2-… --c1-run C1-…               # L3
+python -m grantrisk represent --c2-run C2-… [--representations tfidf,hubert]   # M1
+python -m grantrisk train --m1-run M1-… --l3-run L3-…               # M2
+python -m grantrisk evaluate --m2-run M2-…                          # E2
+python -m grantrisk report --e2-run E2-… --e1-run E1-…              # E3: dashboard.html and the tables
+```
+
+L2 needs the preferred source per factor (`consolidate.preferred_source`), which E1 suggests in `reports/<E1 run>/l2_preferences.yaml` (SPEC-E1-06). E1 needs an L3 run for its label comparison, so the first E1 run uses the gold-only chain (`consolidate --gold-only`, DEC-35).
+
+`run-all` runs the chain in this order and prints each stage's run id. It reuses C1 and C2 with `--c1-run` and `--c2-run`, and it never calls the paid LLM API: an existing LLM run is included with `--llm-run`. Without configured preferences it takes them from a first E1 run on the gold-only chain.
+
+```
+python -m grantrisk run-all --c1-run C1-… --c2-run C2-… [--llm-run L1-…] [--representations tfidf,hubert] [--confirm]
+```

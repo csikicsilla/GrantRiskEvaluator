@@ -15,17 +15,11 @@ def test_help_lists_every_stage(capsys):
 
 
 @pytest.mark.parametrize(
-    "command", [name for name, _, _ in cli.STAGES if name not in cli.IMPLEMENTED] + ["run-all"]
-)
-def test_stage_stub_reports_not_implemented(command, capsys):
-    assert cli.main([command]) == cli.EXIT_NOT_IMPLEMENTED
-    assert "not implemented" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize(
     "argv",
     [["label"], ["extract"], ["extract", "--extractor", "regex", "--c1-run", "x"], ["consolidate", "--manual-run", "x"],
-     ["convert"]],
+     ["convert"], ["validate"], ["validate", "--manual-run", "x", "--l3-run", "y"],
+     ["represent"], ["train", "--m1-run", "x"], ["extract", "--extractor", "manual", "--c2-run", "x"],
+     ["extract", "--extractor", "llm", "--c1-run", "x"], ["evaluate"]],
 )
 def test_implemented_commands_need_their_arguments(argv):
     with pytest.raises(SystemExit) as exc:
