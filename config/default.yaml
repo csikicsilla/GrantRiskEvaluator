@@ -142,3 +142,12 @@ train:                     # M2
   grouped_check:           # SPEC-M2-08, optional
     enabled: false
     models: []             # e.g. [tfidf/logreg], the best model runs by E2
+
+evaluate:                  # E2
+  significance: true       # SPEC-E2-09: the best model run against each other one (corrected resampled t-test)
+
+report:                    # E3; the chain of runs the report is built from (Spec_E3_Report.md §2.1)
+  chain:                   # the E3 command's arguments override these
+    e2_run: null           # the E2 run; its M2, L3 and C1 runs and theirs follow from the lineage
+    e1_run: null           # the E1 run of the gold validation; null leaves the extraction part out
+    l3_run: null           # only for a report without models (no E2 run)
