@@ -164,7 +164,7 @@ def test_document_set_must_be_named(conn, tmp_path, chain):
     _, manual = chain
     with pytest.raises(L2InputError, match="either a C2 run or the gold-only mode"):
         consolidate.run(conn, {}, tmp_path / "data", manual_run_id=manual)
-    with pytest.raises(L2InputError, match="C2 is not implemented"):
+    with pytest.raises(ValueError, match="does not exist"):
         consolidate.run(conn, {}, tmp_path / "data", manual_run_id=manual, c2_run_id="C2-x")
 
 

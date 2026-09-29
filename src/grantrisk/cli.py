@@ -25,7 +25,7 @@ STAGES = [
 EXIT_NOT_IMPLEMENTED = 3
 
 
-IMPLEMENTED = {"acquire", "convert", "extract", "consolidate", "label"}  # convert: the comparison so far
+IMPLEMENTED = {"acquire", "convert", "extract", "consolidate", "label"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--converters", default="pymupdf4llm-legacy,pymupdf4llm,docling", help="converters to compare, comma-separated"
     )
     convert.add_argument("--out", help="an existing comparison folder to add to or resume (default: a new one)")
+    convert.add_argument("--resume", help="an unfinished C2 run to continue")
+    convert.add_argument("--workers", type=int, help="parallel worker processes (default: convert.workers)")
 
     extract = stage_parsers["extract"]
     extract.add_argument("--extractor", required=True, choices=["manual"], help="the extractor to run (regex and llm follow)")
@@ -121,6 +123,15 @@ def _compare_converters(cfg: config_mod.Config, args: argparse.Namespace) -> int
     return 0
 
 
+def _convert(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
+    from grantrisk.corpus import convert
+
+    return convert.run(
+        conn, cfg.values, cfg.data_root, c1_run_id=args.c1_run, resume_run_id=args.resume, workers=args.workers,
+        progress=lambda line: print(line, file=sys.stderr, flush=True),
+    )
+
+
 def _extract(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
     from grantrisk.corpus.acquire import load_import_config
     from grantrisk.extraction.manual import gold
@@ -183,8 +194,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config_mod.load(args.config)
     if args.command == "acquire":
         return _acquire(cfg, args)
-    if args.command == "convert" and args.compare:
-        return _compare_converters(cfg, args)
+    if args.command == "convert":
+        return _compare_converters(cfg, args) if args.compare else _run_stage("convert", _convert)(cfg, args)
     if args.command == "extract":
         return _run_stage("extract", _extract)(cfg, args)
     if args.command == "consolidate":

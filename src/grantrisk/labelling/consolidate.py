@@ -171,7 +171,7 @@ def run(
     if gold_only == (c2_run_id is not None):
         raise L2InputError("name either a C2 run or the gold-only mode (DEC-35)")
     if c2_run_id is not None:
-        raise L2InputError("C2 is not implemented yet; until then only the gold-only mode is available")
+        runs.require_complete(conn, c2_run_id, "C2")
     _check_source(conn, manual_run_id, "manual")
     automated_runs = {s: r for s, r in (("regex", regex_run_id), ("llm", llm_run_id)) if r}
     for source, run_id in automated_runs.items():
@@ -181,13 +181,22 @@ def run(
     if automated_runs:
         check_preferences(preferences)
 
-    inputs = [manual_run_id, *automated_runs.values()]
+    inputs = [manual_run_id, *automated_runs.values(), *([c2_run_id] if c2_run_id else [])]
     run_id = runs.start(conn, "L2", config_values, inputs=inputs)
     report_path = None
     try:
         manual = load_observations(conn, manual_run_id)
         automated = {s: load_observations(conn, r) for s, r in automated_runs.items()}
-        doc_ids = sorted({d for d, _ in manual})
+        if c2_run_id:  # SPEC-L2-01: the documents with text
+            doc_ids = sorted(
+                r[0] for r in conn.execute(
+                    "SELECT doc_id FROM document_texts WHERE run_id = ? AND status = 'ok'", (c2_run_id,)
+                )
+            )
+            document_set = {"mode": "c2", "from_run": c2_run_id, "documents": len(doc_ids)}
+        else:
+            doc_ids = sorted({d for d, _ in manual})
+            document_set = {"mode": GOLD_ONLY, "from_run": manual_run_id, "documents": len(doc_ids)}
         rows = consolidate(doc_ids, manual, automated, preferences)
         by_rule = {f: collections.Counter() for f in FACTORS}
         by_source = {f: collections.Counter() for f in FACTORS}
@@ -196,7 +205,7 @@ def run(
             by_source[r.factor][r.chosen_source or "none"] += 1
         report = {
             "input_runs": {"manual": manual_run_id, **automated_runs},
-            "document_set": {"mode": GOLD_ONLY, "from_run": manual_run_id, "documents": len(doc_ids)},
+            "document_set": document_set,
             "policy": "DEC-18: manual points, then the preferred source, then the other source",
             "preferred_source": dict(preferences) if automated_runs else None,
             "preferences_from_e1_run": settings.get("preferences_from_e1_run") if automated_runs else None,
