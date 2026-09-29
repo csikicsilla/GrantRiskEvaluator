@@ -57,16 +57,83 @@ label:                     # L3
 
 represent:                 # M1
   representations: [tfidf, hubert, e5, bge_m3, qwen3_8b]
-  tfidf:
+  tfidf:                   # SPEC-M1-05; fitted inside each training fold by M2
+    lowercase: true
+    token_pattern: '(?u)\b\w\w+\b'   # \w keeps the Hungarian letters
     ngram_range: [1, 2]
     min_df: 2
     max_df: 0.9
     sublinear_tf: true
     max_features: 200000
+    stop_words: hungarian  # the old list, cleaned (ISS-43)
+  models:                  # input limits from the model cards; check them against the tokenizers (M1 §6)
+    hubert:
+      model_id: SZTAKI-HLT/hubert-base-cc
+      revision: 028baac7feb87a7b2f042bbdaa5deec6513c6060   # the snapshot in the local cache (ARC-06)
+      location: local
+      pooling: mean        # no sentence-embedding head: the attention-masked mean (SPEC-M1-03)
+      prefix: ""
+      input_limit: 512
+      normalize_chunks: false
+      batch_size: 8
+    e5:
+      model_id: intfloat/multilingual-e5-large
+      revision: 3d7cfbdacd47fdda877c5cd8a79fbcc4f2a574f3   # the snapshot in the local cache
+      location: hosted     # DEC-24; locally only for the equivalence check
+      provider: null       # not chosen yet (M1 §6); a name under represent.providers
+      provider_model_id: null   # the provider's name for the model, if it differs
+      pooling: mean
+      prefix: "passage: "
+      input_limit: 512
+      normalize_chunks: true
+      batch_size: 4
+      prices_per_mtok: {input: null}
+    bge_m3:
+      model_id: BAAI/bge-m3
+      revision: null       # pin the commit when the tokenizer is downloaded (ARC-06)
+      location: hosted
+      provider: null
+      provider_model_id: null
+      pooling: cls
+      prefix: ""
+      input_limit: 8192
+      normalize_chunks: true
+      prices_per_mtok: {input: null}
+    qwen3_8b:
+      model_id: Qwen/Qwen3-Embedding-8B
+      revision: null       # pin the commit when the tokenizer is downloaded (ARC-06)
+      location: hosted
+      provider: null
+      provider_model_id: null
+      pooling: last_token
+      prefix: ""           # no instruction for documents
+      input_limit: 32768
+      normalize_chunks: true
+      prices_per_mtok: {input: null}
+  providers: {}            # e.g. name: {api: openai_compatible, url: …/v1/embeddings, api_key_env: …,
+                           #             max_input_tokens: null, max_chunks_per_request: 16, margin_tokens: 8}
+  budget_usd: null         # the ceiling for hosted computation in one invocation (SPEC-M1-04)
+  max_retries: 5
+  cache_index_batch: 32    # cache index rows written per batch (SPEC-M1-06)
+  equivalence_check:       # SPEC-M1-07
+    enabled: true
+    representation: e5
+    n_documents: 5
+    min_cosine: 0.99
 
 train:                     # M2
+  representations: null    # null: every representation of the M1 run
   classifiers: [logreg, svm, rf, majority]
+  classifier_params:       # SPEC-M2-04 defaults; not tuned this week
+    logreg: {C: 1.0, class_weight: balanced, max_iter: 5000}
+    svm: {C: 1.0, kernel: rbf, gamma: scale, class_weight: balanced, calibration_cv: 5}
+    rf: {n_estimators: 500, class_weight: balanced, n_jobs: 1}
+    majority: {}
   cv:
     n_splits: 5
     n_repeats: 5
     random_state: 42
+  n_jobs: 1                # folds fitted in parallel; the result does not depend on it
+  grouped_check:           # SPEC-M2-08, optional
+    enabled: false
+    models: []             # e.g. [tfidf/logreg], the best model runs by E2

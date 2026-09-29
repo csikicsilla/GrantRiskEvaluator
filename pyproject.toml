@@ -18,6 +18,8 @@ dependencies = [
 dev = ["pytest>=8"]
 convert = ["pymupdf4llm>=1.28"]   # the C2 converter (DEC-30); docling only for the comparison
 llm = ["anthropic>=1.9"]          # the L1 LLM extractor
+ml = ["numpy>=1.26", "scikit-learn>=1.5", "scipy>=1.10"]   # M1 TF-IDF, M2 cross-validation, E2 t-test
+embed = ["transformers>=4.40", "torch>=2.2"]  # M1 local embeddings (huBERT; e5 for the equivalence check)
 
 [project.scripts]
 grantrisk = "grantrisk.cli:main"
