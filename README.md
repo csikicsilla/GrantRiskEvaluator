@@ -45,11 +45,13 @@ This needs the package installed (see Setup). Without installing it, put the sou
 Python 3.11 or later.
 
 ```
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-pip install -e ".[dev]"
+python -m venv C:\Users\<you>\.venvs\grantrisk
+C:\Users\<you>\.venvs\grantrisk\Scripts\activate
+pip install -e ".[dev]" pymupdf4llm docling
 python -m pytest
 ```
+
+Keep the virtual environment on a path with ASCII letters only. Docling's PDF parser (a C++ library) cannot open its own resource files under a path such as `30_Kód`. For the same reason, C2 hands PDFs to Docling as byte streams, not as paths. The converters' models are downloaded on first use; later runs can work offline (`HF_HUB_OFFLINE=1`, SPEC-C2-03).
 
 The tests also run without installing the package: `python -m pytest` from this folder (the source folder is on pytest's path).
 

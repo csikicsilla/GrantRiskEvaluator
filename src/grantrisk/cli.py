@@ -25,7 +25,7 @@ STAGES = [
 EXIT_NOT_IMPLEMENTED = 3
 
 
-IMPLEMENTED = {"acquire", "extract", "consolidate", "label"}
+IMPLEMENTED = {"acquire", "convert", "extract", "consolidate", "label"}  # convert: the comparison so far
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,6 +38,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True, metavar="command")
     stage_parsers = {name: sub.add_parser(name, help=f"{code}: {help_text}") for name, code, help_text in STAGES}
     sub.add_parser("run-all", help="run every stage in order")
+
+    convert = stage_parsers["convert"]
+    convert.add_argument("--c1-run", required=True, help="the C1 run that holds the corpus")
+    convert.add_argument("--compare", action="store_true", help="compare the converters on the sample (SPEC-C2-11)")
+    convert.add_argument(
+        "--converters", default="pymupdf4llm-legacy,pymupdf4llm,docling", help="converters to compare, comma-separated"
+    )
+    convert.add_argument("--out", help="an existing comparison folder to add to or resume (default: a new one)")
 
     extract = stage_parsers["extract"]
     extract.add_argument("--extractor", required=True, choices=["manual"], help="the extractor to run (regex and llm follow)")
@@ -74,6 +82,43 @@ def _run_stage(name: str, work) -> int:
         return 0
 
     return call
+
+
+def _compare_converters(cfg: config_mod.Config, args: argparse.Namespace) -> int:
+    """SPEC-C2-11: convert the configured sample with each converter, for DEC-30."""
+    import datetime
+    import zipfile
+
+    from grantrisk.corpus import converters, convert
+    from grantrisk.store import db
+
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S")
+    out_dir = cfg.resolve(args.out) if args.out else cfg.data_root / "reports" / "c2_comparison" / stamp
+    conn = db.connect(cfg.data_root)
+    try:
+        docs = {
+            r["doc_id"]: r
+            for r in conn.execute("SELECT doc_id, file_path, page_count FROM documents WHERE run_id = ?", (args.c1_run,))
+        }
+    finally:
+        conn.close()
+    sample = []
+    for item in cfg.values["convert"]["comparison_sample"]:
+        if "doc_id" in item:
+            d = docs[item["doc_id"]]
+            sample.append(convert.SampleDocument(item["label"], item["name"], cfg.data_root / d["file_path"], d["page_count"]))
+        else:  # a manual file from the archive that is not part of the corpus
+            target = out_dir / "input" / item["manual_file"]
+            if not target.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(cfg.source("manual_zip")) as z:
+                    target.write_bytes(z.read(f"data/raw_pdfs/{item['manual_file']}"))
+            sample.append(convert.SampleDocument(item["label"], item["name"], target, None))
+    adapters = [converters.create(name) for name in args.converters.split(",")]
+    convert.compare(adapters, sample, out_dir)
+    print(out_dir)
+    print((out_dir / "summary.md").read_text(encoding="utf-8"))
+    return 0
 
 
 def _extract(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
@@ -138,6 +183,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config_mod.load(args.config)
     if args.command == "acquire":
         return _acquire(cfg, args)
+    if args.command == "convert" and args.compare:
+        return _compare_converters(cfg, args)
     if args.command == "extract":
         return _run_stage("extract", _extract)(cfg, args)
     if args.command == "consolidate":

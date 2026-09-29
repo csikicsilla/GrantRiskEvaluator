@@ -24,7 +24,8 @@ def test_stage_stub_reports_not_implemented(command, capsys):
 
 @pytest.mark.parametrize(
     "argv",
-    [["label"], ["extract"], ["extract", "--extractor", "regex", "--c1-run", "x"], ["consolidate", "--manual-run", "x"]],
+    [["label"], ["extract"], ["extract", "--extractor", "regex", "--c1-run", "x"], ["consolidate", "--manual-run", "x"],
+     ["convert"]],
 )
 def test_implemented_commands_need_their_arguments(argv):
     with pytest.raises(SystemExit) as exc:

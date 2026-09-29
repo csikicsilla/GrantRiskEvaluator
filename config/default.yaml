@@ -16,9 +16,16 @@ acquire:                   # C1; the import configuration (manual call codes, ov
   import_config: config/import.yaml
 
 convert:                   # C2
-  converter: null          # chosen on Wednesday (DEC-30)
+  converter: pymupdf4llm   # with its layout model; chosen by the comparison (DEC-30)
   ocr_min_chars_per_page: 500
-  workers: 8
+  workers: 4               # each worker loads the layout model; 4 fit in 16 GB
+  comparison_sample:       # SPEC-C2-11; mostly gold documents
+    - {label: "Plusz call with many tables", name: dimop-plusz-126-24, doc_id: 95f2719354f4b21c}
+    - {label: "old-generation TOP call", name: top-431-16, doc_id: 317b2dea1b0ba7e0}
+    - {label: "VP call", name: vp6-7211-20, doc_id: 5bfe8e7220c6ef54}
+    - {label: "product description", name: vekop-521-17, doc_id: abcc60a4aa00fd55}
+    - {label: "RRF call", name: rrf-112-21, doc_id: acdf0bf199e87a47}
+    - {label: "OCR case (a test file, not in the corpus)", name: dimop-plusz-123b-24-print, manual_file: "dimop-plusz-123B-24-felhívás.pdf"}
 
 extract:                   # L1
   manual:
