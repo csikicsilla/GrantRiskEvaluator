@@ -2,19 +2,8 @@
 
 import csv
 
-FACTORS = [
-    "fin_form", "tam_osszeg", "konzorcium", "bead_napok", "max_tam_int",
-    "eloleg", "idotartam", "tam_tevekenyseg", "egysz_elszam", "biztositek",
-]
-
-# Allowed points per factor (Spec_L3_ScoreAndLabel.md §2.1).
-ALLOWED = {f: {0, 1, 2, 3} for f in FACTORS} | {
-    "fin_form": {1, 2, 3},
-    "konzorcium": {0, 3},
-    "egysz_elszam": {0, 3},
-    "biztositek": {0, 3},
-    "tam_tevekenyseg": {0, 2, 3},
-}
+from grantrisk.labelling.scoring import ALLOWED_POINTS as ALLOWED
+from grantrisk.labelling.scoring import FACTORS
 
 
 def read(path):

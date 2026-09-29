@@ -25,6 +25,9 @@ STAGES = [
 EXIT_NOT_IMPLEMENTED = 3
 
 
+IMPLEMENTED = {"label"}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="grantrisk",
@@ -33,15 +36,36 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", help="configuration file (default: config/default.yaml)")
     sub = parser.add_subparsers(dest="command", required=True, metavar="command")
-    for name, code, help_text in STAGES:
-        sub.add_parser(name, help=f"{code}: {help_text}")
+    stage_parsers = {name: sub.add_parser(name, help=f"{code}: {help_text}") for name, code, help_text in STAGES}
     sub.add_parser("run-all", help="run every stage in order")
+
+    label = stage_parsers["label"]
+    label.add_argument("--l2-run", required=True, help="the L2 run whose consolidated factors are labelled")
+    label.add_argument("--c1-run", required=True, help="the C1 run that holds the documents' programmes")
     return parser
+
+
+def _label(cfg: config_mod.Config, args: argparse.Namespace) -> int:
+    from grantrisk.labelling import label
+    from grantrisk.store import db
+
+    conn = db.connect(cfg.data_root)
+    try:
+        run_id = label.run(conn, cfg.values, cfg.data_root, l2_run_id=args.l2_run, c1_run_id=args.c1_run)
+    except ValueError as exc:  # includes L3InputError
+        print(f"grantrisk label: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
+    print(run_id)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     cfg = config_mod.load(args.config)
+    if args.command == "label":
+        return _label(cfg, args)
     print(f"grantrisk {args.command}: not implemented yet (data root: {cfg.data_root})", file=sys.stderr)
     return EXIT_NOT_IMPLEMENTED
 
