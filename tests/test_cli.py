@@ -22,9 +22,13 @@ def test_stage_stub_reports_not_implemented(command, capsys):
     assert "not implemented" in capsys.readouterr().err
 
 
-def test_label_needs_its_input_runs():
+@pytest.mark.parametrize(
+    "argv",
+    [["label"], ["extract"], ["extract", "--extractor", "regex", "--c1-run", "x"], ["consolidate", "--manual-run", "x"]],
+)
+def test_implemented_commands_need_their_arguments(argv):
     with pytest.raises(SystemExit) as exc:
-        cli.main(["label"])
+        cli.main(argv)
     assert exc.value.code == 2
 
 

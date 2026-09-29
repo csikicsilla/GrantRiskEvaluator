@@ -25,7 +25,7 @@ STAGES = [
 EXIT_NOT_IMPLEMENTED = 3
 
 
-IMPLEMENTED = {"acquire", "label"}
+IMPLEMENTED = {"acquire", "extract", "consolidate", "label"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,10 +39,61 @@ def build_parser() -> argparse.ArgumentParser:
     stage_parsers = {name: sub.add_parser(name, help=f"{code}: {help_text}") for name, code, help_text in STAGES}
     sub.add_parser("run-all", help="run every stage in order")
 
+    extract = stage_parsers["extract"]
+    extract.add_argument("--extractor", required=True, choices=["manual"], help="the extractor to run (regex and llm follow)")
+    extract.add_argument("--c1-run", required=True, help="the C1 run that holds the corpus")
+
+    consolidate = stage_parsers["consolidate"]
+    consolidate.add_argument("--manual-run", required=True, help="the L1 run of the manual (gold) import")
+    consolidate.add_argument("--regex-run", help="the L1 run of the regex extractor")
+    consolidate.add_argument("--llm-run", help="the L1 run of the LLM extractor")
+    doc_set = consolidate.add_mutually_exclusive_group(required=True)
+    doc_set.add_argument("--c2-run", help="the C2 run whose documents with text form the document set")
+    doc_set.add_argument("--gold-only", action="store_true", help="the documents of the manual run only (DEC-35)")
+
     label = stage_parsers["label"]
     label.add_argument("--l2-run", required=True, help="the L2 run whose consolidated factors are labelled")
     label.add_argument("--c1-run", required=True, help="the C1 run that holds the documents' programmes")
     return parser
+
+
+def _run_stage(name: str, work) -> int:
+    """Open the database, run one stage, print its run id; report contract errors without a traceback."""
+    from grantrisk.store import db
+
+    def call(cfg: config_mod.Config, args: argparse.Namespace) -> int:
+        conn = db.connect(cfg.data_root)
+        try:
+            run_id = work(conn, cfg, args)
+        except ValueError as exc:
+            print(f"grantrisk {name}: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            conn.close()
+        print(run_id)
+        return 0
+
+    return call
+
+
+def _extract(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
+    from grantrisk.corpus.acquire import load_import_config
+    from grantrisk.extraction.manual import gold
+
+    pins = load_import_config(cfg.resolve(cfg.values["acquire"]["import_config"]))["gold_pins"]
+    return gold.run(
+        conn, cfg.values, cfg.data_root, c1_run_id=args.c1_run, gold_csv=cfg.source("gold_csv"),
+        gold_pins=pins, gold_set=cfg.values["extract"]["manual"]["gold_set"],
+    )
+
+
+def _consolidate(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
+    from grantrisk.labelling import consolidate
+
+    return consolidate.run(
+        conn, cfg.values, cfg.data_root, manual_run_id=args.manual_run, regex_run_id=args.regex_run,
+        llm_run_id=args.llm_run, c2_run_id=args.c2_run, gold_only=args.gold_only,
+    )
 
 
 def _acquire(cfg: config_mod.Config, args: argparse.Namespace) -> int:
@@ -87,6 +138,10 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config_mod.load(args.config)
     if args.command == "acquire":
         return _acquire(cfg, args)
+    if args.command == "extract":
+        return _run_stage("extract", _extract)(cfg, args)
+    if args.command == "consolidate":
+        return _run_stage("consolidate", _consolidate)(cfg, args)
     if args.command == "label":
         return _label(cfg, args)
     print(f"grantrisk {args.command}: not implemented yet (data root: {cfg.data_root})", file=sys.stderr)

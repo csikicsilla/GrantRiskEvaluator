@@ -21,6 +21,8 @@ convert:                   # C2
   workers: 8
 
 extract:                   # L1
+  manual:
+    gold_set: gold_second  # the gold pins are in acquire.import_config (DEC-34)
   llm:
     prompt: prompts/P5_system_prompt.txt
     model: claude-haiku-4-5-20251001
@@ -32,7 +34,8 @@ extract:                   # L1
       output: null
 
 consolidate:               # L2
-  preferred_source: {}     # per factor, filled from the E1 report (SPEC-L2-03)
+  preferred_source: {}     # per factor, llm or regex, filled from the E1 report (SPEC-L2-03)
+  preferences_from_e1_run: null
 
 label:                     # L3
   low_coverage_threshold: 5
