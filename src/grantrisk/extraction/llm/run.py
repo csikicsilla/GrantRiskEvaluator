@@ -388,8 +388,9 @@ def run(
                         with transaction(conn):
                             _insert(conn, run_id, s, result)
                     if progress:
-                        progress(f"{result['doc_id']} {'reused' if result['reused'] else 'answered'}"
-                                 f"{' ERROR ' + result['error'] if result['error'] else ''}"
+                        state = "ERROR " + result["error"] if result["error"] else (
+                            "reused" if result["reused"] else "answered")
+                        progress(f"{result['doc_id']} {state}"
                                  f" (spent {budget.spent - start_spent:.2f} USD now, {budget.spent:.2f} USD in the run)")
         with transaction(conn):
             for result in failed:

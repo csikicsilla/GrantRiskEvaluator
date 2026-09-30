@@ -105,7 +105,7 @@ def test_prompt_is_sent_unchanged(conn, tmp_path):
     client.messages.create = lambda **p: sent.append(p) or create(**p)
     llm.run(conn, {}, tmp_path / "data", client, settings(), c2_run_id=c2, doc_ids=[ids["A"]])
     assert sent[0]["system"] == PROMPT.read_text(encoding="utf-8")
-    assert sent[0]["model"] == "test-model" and sent[0]["temperature"] == 0
+    assert sent[0]["model"] == "test-model" and sent[0]["extra_body"] == {"temperature": 0}
 
 
 def test_corpus_run_needs_confirmation(conn, tmp_path):

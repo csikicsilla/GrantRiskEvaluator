@@ -37,12 +37,22 @@ def test_schema_requires_every_factor_and_allows_the_open_ended_period():
 def test_request_omits_temperature_the_model_rejects():
     with_t = extractor.build_request("m", "P", MD, max_tokens=100, temperature=0, thinking=None)
     without = extractor.build_request("m", "P", MD, max_tokens=100, temperature=None, thinking="disabled")
-    assert with_t["temperature"] == 0 and "thinking" not in with_t
-    assert "temperature" not in without and without["thinking"] == {"type": "disabled"}
+    assert with_t["extra_body"] == {"temperature": 0} and "thinking" not in with_t
+    assert "extra_body" not in without and without["thinking"] == {"type": "disabled"}
     assert with_t["system"] == "P" and with_t["messages"] == [{"role": "user", "content": MD}]
     assert with_t["output_config"]["format"]["type"] == "json_schema"
     sonnet = extractor.build_request("m", "P", MD, max_tokens=100, temperature=None, thinking="between_tools")
-    assert sonnet["thinking"] == {"type": "between_tools"} and "temperature" not in sonnet
+    assert sonnet["thinking"] == {"type": "between_tools"} and "extra_body" not in sonnet
+
+
+@pytest.mark.parametrize("temperature, thinking", [(0, None), (None, "disabled"), (None, "between_tools")])
+def test_request_fits_the_installed_sdk(temperature, thinking):
+    """The fake client of the run tests takes any argument; the real SDK does not (anthropic 1.x)."""
+    import inspect
+
+    anthropic = pytest.importorskip("anthropic")
+    params = extractor.build_request("m", "P", MD, max_tokens=100, temperature=temperature, thinking=thinking)
+    inspect.signature(anthropic.resources.messages.Messages.create).bind(None, **params)
 
 
 @pytest.mark.parametrize(

@@ -73,7 +73,9 @@ def build_request(
         "output_config": {"format": {"type": "json_schema", "schema": output_schema()}},
     }
     if temperature is not None:  # some models reject sampling parameters
-        params["temperature"] = temperature
+        # anthropic 1.x no longer takes sampling parameters as arguments; models that still accept
+        # them, such as Haiku 4.5, get them in the request body.
+        params["extra_body"] = {"temperature": temperature}
     if thinking == "disabled":
         params["thinking"] = {"type": "disabled"}
     elif thinking == "between_tools":  # thinking off on models that reject "disabled", e.g. Sonnet 5.5
