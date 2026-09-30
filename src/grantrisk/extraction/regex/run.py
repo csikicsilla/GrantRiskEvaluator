@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from grantrisk.extraction import documents
 from grantrisk.extraction.regex.extractor import Observation, extract
 from grantrisk.extraction.regex.rules import RULES_VERSION
 from grantrisk.labelling.scoring import FACTORS
@@ -21,24 +22,6 @@ from grantrisk.store import files, runs
 from grantrisk.store.db import transaction
 
 SOURCE = "regex"
-
-
-def _documents(
-    conn: sqlite3.Connection, c2_run_id: str, doc_ids: Sequence[str] | None
-) -> tuple[list[tuple[str, str]], list[dict[str, Any]]]:
-    """(doc_id, Markdown) of the documents with text, and the skipped ones (SPEC-L1-03, -14)."""
-    rows = conn.execute(
-        "SELECT doc_id, status, error, markdown FROM document_texts WHERE run_id = ? ORDER BY doc_id", (c2_run_id,)
-    ).fetchall()
-    if doc_ids is not None:
-        wanted = set(doc_ids)
-        rows = [r for r in rows if r["doc_id"] in wanted]
-    texts = [(r["doc_id"], r["markdown"]) for r in rows if r["status"] == "ok"]
-    skipped = [{"doc_id": r["doc_id"], "reason": f"C2 status {r['status']}: {r['error']}"} for r in rows if r["status"] != "ok"]
-    if doc_ids is not None:
-        present = {r["doc_id"] for r in rows}
-        skipped += [{"doc_id": d, "reason": "not in the C2 run"} for d in sorted(set(doc_ids) - present)]
-    return texts, skipped
 
 
 def _insert(conn: sqlite3.Connection, run_id: str, doc_id: str, observations: Mapping[str, Observation]) -> None:
@@ -88,7 +71,7 @@ def run(
     run_id = runs.start(conn, "L1", snapshot, inputs=[c2_run_id])
     report_path = None
     try:
-        texts, skipped = _documents(conn, c2_run_id, doc_ids)
+        texts, skipped = documents.of_c2_run(conn, c2_run_id, doc_ids)
         results = {}
         for i, (doc_id, markdown) in enumerate(texts, start=1):
             results[doc_id] = extract(markdown)

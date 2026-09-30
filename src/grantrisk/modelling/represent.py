@@ -208,9 +208,16 @@ def equivalence_check(
     n_documents: int = 5,
     min_cosine: float = 0.99,
 ) -> dict[str, Any]:
-    """SPEC-M1-07: cosine similarity of the hosted and the locally computed vectors of a few documents."""
+    """SPEC-M1-07: cosine similarity of the hosted and the locally computed vectors of a few documents.
+
+    The local vectors are computed from the same chunks as the hosted ones (DEC-58): the
+    hosted chunks keep a margin below the input limit (DEC-45), and different chunk
+    boundaries would add their own difference to that of the weights' precision.
+    """
     results = []
-    hosted_prov, local_prov = hosted_embedder.provenance(), local_embedder.provenance()
+    budget = hosted_embedder.chunk_budget()
+    hosted_prov = hosted_embedder.provenance()
+    local_prov = {**local_embedder.provenance(), "chunk_budget": budget}
     for d in _sample(sorted(hashes), n_documents):
         h = hashes[d]
         hosted_key = cache_key(h, hosted_prov)
@@ -219,7 +226,7 @@ def equivalence_check(
             continue
         local_key = cache_key(h, local_prov)
         if not index.get(local_key):
-            dv = embed_document(local_embedder, document_text(conn, c2_run_id, d))
+            dv = embed_document(local_embedder, document_text(conn, c2_run_id, d), budget)
             index.put(local_key, local_embedder.key, local_prov, local_embedder.resolved_revision(), h,
                       dv.vector, dv.n_chunks, dv.n_tokens)
         a, b = index.load(hosted_key), index.load(local_key)
@@ -230,6 +237,7 @@ def equivalence_check(
         "representation": hosted_embedder.key,
         "provider": hosted_embedder.provider,
         "model_id": hosted_prov["model_id"],
+        "chunk_budget": budget,
         "min_cosine_required": min_cosine,
         "documents": results,
         "min_cosine": min(compared) if compared else None,
@@ -283,7 +291,7 @@ def run(
         if row is None or row["stage"] != "M1" or row["status"] == "complete":
             raise ValueError(f"run {resume_run_id} is not an unfinished M1 run")
         run_id = resume_run_id
-        conn.execute("UPDATE runs SET status = 'running', error = NULL WHERE run_id = ?", (run_id,))
+        runs.resume(conn, run_id, "M1")  # records the code version that continues it (DEC-57)
     else:
         snapshot = {**config_values, "m1_run": {"representations": reps, "plain_text_version": PLAIN_TEXT_VERSION}}
         run_id = runs.start(conn, "M1", snapshot, inputs=[c2_run_id])

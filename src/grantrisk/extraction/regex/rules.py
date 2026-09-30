@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 from grantrisk.extraction.regex.text import (
@@ -27,10 +28,10 @@ from grantrisk.extraction.regex.text import (
     pattern,
     percent,
 )
-from grantrisk.labelling.scoring import UNTIL_FUNDS_RUN_OUT
+from grantrisk.labelling.scoring import LONGEST_DURATION, UNTIL_FUNDS_RUN_OUT
 
 # Change RULES_VERSION whenever a rule changes; every run records it (Spec_L1 §2.1).
-RULES_VERSION = "1"
+RULES_VERSION = "2"  # 2: idotartam from a deadline date and its longest duration (DEC-37); eloleg of any loan (DEC-40)
 
 
 @dataclass
@@ -361,10 +362,11 @@ ADVANCE_DECREE = pattern(r"272/2014\.?\s*\(\s*XI\.?\s*5\.?\s*\)\s*Korm\.?\s*rend
 
 def eloleg(doc: Document) -> Finding:
     """Advance payment: the largest percentage near „előleg"; the special cases of the definition where an
-    anchor decides them: a loan → 100, „nem releváns" or „előleg igénylésére nincs mód" → 0. A reference
-    to 272/2014. Korm. rendelet 116. § needs a judgement about the applicants → ambiguous."""
-    for m in doc.anchors(LOAN_LABEL):
-        return found(100, (m.start(), _next_line_end(doc, m.end())), "loan")
+    anchor decides them: a loan (fin_form) → 100, „nem releváns" or „előleg igénylésére nincs mód" → 0. A
+    reference to 272/2014. Korm. rendelet 116. § needs a judgement about the applicants → ambiguous."""
+    form = fin_form(doc)
+    if form.value == "loan":  # the definition: a loan's advance is always 100 % (DEC-40)
+        return found(100, form.span, "loan")
     best = None
     decree = None
     for m in doc.anchors(ADVANCE_ANCHORS):
@@ -401,19 +403,76 @@ DURATION_ANCHORS = pattern(
 MONTHS = re.compile(r"(?<![\d.,])(\d{1,3})\s*hónap(?!pal)", re.IGNORECASE)
 
 
+def months_between(start: date, end: date) -> float:
+    """DEC-37: the calendar months from ``start`` to ``end``, each day of difference in the day of the month
+    counting as 1/30 month: 2027-12-31 → 2029-12-31 is 24, 2023-11-10 → 2027-12-31 is 49.7."""
+    return round(12 * (end.year - start.year) + (end.month - start.month) + (end.day - start.day) / 30, 2)
+
+
+# A date that closes something: "2016. május 31-ig", "2023.11.10. napig".
+CLOSES = re.compile(r"\.?\s*(?:[-–]\s*)?(?:ig|napig)\b", re.IGNORECASE)
+# A date that starts something, and so is no deadline: "2016.01.01-től", "nem lehet korábbi, mint 2016.01.01.",
+# "kezdete: …".
+STARTS = re.compile(r"\.?\s*(?:[-–]\s*)?t[óő]l\b", re.IGNORECASE)
+START_BEFORE = pattern(r"(?:korábbi|kezdet\w*)\W+(?:\w+\W+){0,4}$")
+DURATION_NOT_DEFINED = pattern(r"időtartam\w*[^.|]{0,80}?nem értelmezett")
+
+
+def last_submission_date(doc: Document) -> date | None:
+    """The closing date of the call's last submission period or evaluation stage (DEC-37): the end of a period
+    found as for bead_napok (DEC-38), or a single closing date near the submission anchors."""
+    last = None
+    for m in doc.anchors(SUBMISSION_ANCHORS):
+        lo, hi = doc.segment(m, 1200, before=150)
+        ends = [max(d for d, *_ in dates(doc.view[s:e], s)) for _, s, e in _periods(doc, lo, hi)]
+        ends += [d for d, s, e in dates(doc.view[lo:hi], lo) if CLOSES.match(doc.view, e)]
+        for end in ends:
+            last = end if last is None else max(last, end)
+    return last
+
+
+def _deadlines(doc: Document, start: int, end: int) -> list[tuple[date, int, int]]:
+    """The dates in ``start``–``end`` that can be a deadline: every date but those that start something."""
+    return [(d, s, e) for d, s, e in dates(doc.view[start:end], start)
+            if not STARTS.match(doc.view, e) and not START_BEFORE.search(doc.view, max(start, s - 60), s)]
+
+
 def idotartam(doc: Document) -> Finding:
     """Project duration in months: the largest number of months in the answers to the duration anchors.
-    A deadline given as a date is not a duration and gives no value."""
+
+    A call that gives a completion deadline as a date instead gets the months from its last submission date
+    to that deadline: the shortest time a project can have. The longest duration, `maximalis`, if the call
+    says that the duration is not defined, or if submission stays open until the completion deadline itself
+    (DEC-37). Without a submission date, no value."""
     best = None
+    deadline = None
+    not_defined = None
     for m in doc.anchors(DURATION_ANCHORS):
         _, end = doc.segment(m, 300)
         for mm in MONTHS.finditer(doc.view, m.end(), end):
             value = int(mm.group(1))
             if value > 0 and (best is None or value > best[0]):
                 best = (value, _span(m.start(), mm.start(), mm.end()))
+        for d, s, e in _deadlines(doc, m.end(), end):
+            if deadline is None or d > deadline[0]:
+                deadline = (d, _span(m.start(), s, e))
+        if not_defined is None:
+            nd = DURATION_NOT_DEFINED.search(doc.view, max(0, m.start() - 200), end)
+            if nd:
+                not_defined = (min(m.start(), nd.start()), max(m.end(), nd.end()))
     if best is not None:
         return found(best[0], best[1])
-    return Finding()
+    if not_defined is not None:
+        return found(LONGEST_DURATION, not_defined, "duration_not_defined")
+    if deadline is None:
+        return Finding()
+    last = last_submission_date(doc)
+    if last is None:
+        return Finding(warnings=["deadline_without_submission_date"])
+    if last >= deadline[0]:  # a project may be submitted until its own deadline: the longest duration
+        return found(LONGEST_DURATION, deadline[1], f"submission_open_until_deadline: {deadline[0].isoformat()}")
+    months = months_between(last, deadline[0])
+    return found(months, deadline[1], f"months_from_dates: {last.isoformat()} → {deadline[0].isoformat()}")
 
 
 # --- tam_tevekenyseg ---------------------------------------------------------------------

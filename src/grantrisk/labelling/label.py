@@ -22,7 +22,7 @@ from grantrisk.labelling.scoring import FACTORS, HIGH, LOW, MEDIUM
 from grantrisk.store import files, runs
 from grantrisk.store.db import transaction
 
-DETERMINED = ("band", "manual")
+DETERMINED = ("band", "manual")  # not top_rule or loan_rule: rule-based points (DEC-31, DEC-40)
 
 
 class L3InputError(ValueError):
@@ -47,7 +47,7 @@ class DocumentInput:
 @dataclass(frozen=True)
 class FactorResult:
     points: Fraction
-    origin: str  # band, manual, mean or top_rule
+    origin: str  # band, manual, mean, top_rule or loan_rule
 
 
 @dataclass(frozen=True)
@@ -154,20 +154,21 @@ def compute(docs: Sequence[DocumentInput], low_coverage_threshold: int = 5) -> L
         raise L3InputError("the L2 run has no documents")
     docs = sorted(docs, key=lambda d: d.doc_id)
 
-    # Points from the expert, the bands and the TOP rule; None where nothing applies.
+    # Points from the expert, the bands, the TOP rule and the loan rule; None where nothing applies.
     found: dict[str, dict[str, FactorResult | None]] = {}
     for d in docs:
         row: dict[str, FactorResult | None] = {}
+        fin_form = scoring.fin_form_of(d.factors["fin_form"].value, d.factors["fin_form"].points)
         for f in FACTORS:
             fi = d.factors[f]
             if fi.points is not None:
                 row[f] = FactorResult(Fraction(fi.points), "manual")
             else:
-                p, origin = scoring.points(f, fi.value, d.programme)
+                p, origin = scoring.points(f, fi.value, d.programme, fin_form)
                 row[f] = None if p is None else FactorResult(Fraction(p), origin)
         found[d.doc_id] = row
 
-    # SPEC-L3-05: means over the determined documents only; the TOP rule does not count.
+    # SPEC-L3-05: means over the determined documents only; the TOP and loan rules do not count.
     means: dict[str, Fraction] = {}
     for f in FACTORS:
         determined = [r[f].points for r in found.values() if r[f] is not None and r[f].origin in DETERMINED]

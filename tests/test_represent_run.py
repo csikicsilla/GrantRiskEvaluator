@@ -229,6 +229,26 @@ def test_equivalence_check(conn, data_root):
     assert report(conn, data_root, run_id)["equivalence_check"]["passed"] is False
 
 
+def test_equivalence_check_cuts_the_local_chunks_like_the_hosted_ones(conn, data_root):
+    """DEC-58: the local vectors of the check use the hosted chunk budget, not their own."""
+    c2 = seed_c2(conn, TEXTS)
+    config = {"represent": {"representations": ["e5"], "equivalence_check": {"n_documents": 2}}}
+    e5 = hosted_e5(Transport())
+    sizes = []
+
+    class Recording(FakeEmbedder):
+        def embed_chunks(self, text, chunks):
+            sizes.extend(len(c.ids) for c in chunks)
+            return super().embed_chunks(text, chunks)
+
+    local = Recording(key="e5", model_id="intfloat/multilingual-e5-large", budget=500)
+    run_id = represent.run(conn, config, data_root, c2_run_id=c2, embedders={"e5": e5},
+                           equivalence_embedder=local, confirmed=True)
+    check = report(conn, data_root, run_id)["equivalence_check"]
+    assert check["chunk_budget"] == e5.chunk_budget() < 500
+    assert sizes and max(sizes) <= e5.chunk_budget()
+
+
 def test_sample_is_spread_over_the_documents():
     assert represent._sample(list("abcdefghi"), 3) == ["a", "e", "i"]
     assert represent._sample(list("ab"), 5) == ["a", "b"]

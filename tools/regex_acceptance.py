@@ -23,7 +23,7 @@ if c2 is None:
 validate = cfg.values["validate"]
 docs = acceptance.gold_documents(
     conn, c1_run_id=acceptance.c1_of(conn, c2), c2_run_id=c2, gold_csv=cfg.source("gold_csv"), gold_pins=pins,
-    old_baseline=cfg.resolve(validate["old_baseline"]), renames=validate.get("old_baseline_renamed"),
+    old_baseline=cfg.source("old_baseline"), renames=validate.get("old_baseline_renamed"),
 )
 print(f"C2 run: {c2}\n")
 print(acceptance.format_table(acceptance.compare(docs)))

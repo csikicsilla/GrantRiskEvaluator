@@ -170,7 +170,7 @@ def run(
         if c1_run_id not in runs.inputs(conn, resume_run_id):
             raise ValueError(f"run {resume_run_id} did not read C1 run {c1_run_id}")
         run_id = resume_run_id
-        conn.execute("UPDATE runs SET status = 'running', error = NULL WHERE run_id = ?", (run_id,))
+        runs.resume(conn, run_id, "C2")  # records the code version that continues it (DEC-57)
     else:
         run_id = runs.start(conn, "C2", config_values, inputs=[c1_run_id])
 

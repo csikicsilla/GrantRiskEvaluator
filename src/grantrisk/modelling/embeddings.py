@@ -115,10 +115,14 @@ class Embedder:
         return None
 
 
-def embed_document(embedder: Embedder, text: str) -> DocumentVector:
-    """Chunk, embed and pool one plain text (SPEC-M1-02, -03)."""
+def embed_document(embedder: Embedder, text: str, budget: int | None = None) -> DocumentVector:
+    """Chunk, embed and pool one plain text (SPEC-M1-02, -03).
+
+    ``budget`` replaces the embedder's own chunk budget, so that the equivalence check can
+    cut the local chunks exactly where the hosted ones were cut (SPEC-M1-07, DEC-58).
+    """
     ids, offsets = embedder.tokenize(text)
-    chunks = plan_chunks(ids, offsets, len(text), embedder.chunk_budget())
+    chunks = plan_chunks(ids, offsets, len(text), budget or embedder.chunk_budget())
     vectors = np.asarray(embedder.embed_chunks(text, chunks), dtype=float)
     if vectors.shape[0] != len(chunks):
         raise ValueError(f"{embedder.key}: {vectors.shape[0]} vectors for {len(chunks)} chunks")

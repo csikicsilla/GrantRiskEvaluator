@@ -96,7 +96,8 @@ def payload(data: Data, today: str) -> dict[str, Any]:
         points[f]["imputed" if r["origin"] == "mean" else str(int(r["points"]))] += 1
     out["coverage"] = {
         f: {"determined": origins.get(f, {}).get("band", 0) + origins.get(f, {}).get("manual", 0),
-            "top_rule": origins.get(f, {}).get("top_rule", 0), "imputed": origins.get(f, {}).get("mean", 0),
+            "rule": origins.get(f, {}).get("top_rule", 0) + origins.get(f, {}).get("loan_rule", 0),
+            "imputed": origins.get(f, {}).get("mean", 0),
             "points": {k: points[f].get(k, 0) for k in ("0", "1", "2", "3", "imputed")}}
         for f in FACTORS
     }
@@ -327,7 +328,7 @@ function renderLabels() {
 // --- coverage and factor distributions
 function renderCoverage() {
   const el = $('#coverage'), cov = D.coverage, n = D.n_documents;
-  const parts = [['determined', 'var(--s1)', 'determined (from a value or the expert)'], ['top_rule', 'var(--s2)', 'TOP rule (DEC-31)'], ['imputed', 'var(--s3)', 'imputed (factor mean)']];
+  const parts = [['determined', 'var(--s1)', 'determined (from a value or the expert)'], ['rule', 'var(--s2)', 'set by a rule (TOP rule DEC-31, loan rule DEC-40)'], ['imputed', 'var(--s3)', 'imputed (factor mean)']];
   const bw = 900, rh = 22, left = 120;
   let s = `<svg viewBox="0 0 ${bw + left + 50} ${Object.keys(cov).length * rh + 10}" width="100%" role="img" aria-label="coverage per factor">`;
   Object.entries(cov).forEach(([fc, c], i) => { let x = left; const y = 4 + i * rh;

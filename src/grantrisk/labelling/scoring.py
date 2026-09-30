@@ -12,7 +12,7 @@ from decimal import Decimal
 from fractions import Fraction
 from typing import Any
 
-RULES_VERSION = "1 (Spec_ScoringSystem.md as of 2026-09-28)"
+RULES_VERSION = "2 (Spec_ScoringSystem.md as of 2026-09-30: the loan rule of DEC-40, idotartam maximalis of DEC-37)"
 
 FACTORS = (
     "fin_form",
@@ -30,9 +30,14 @@ FACTORS = (
 FIN_FORM_POINTS = {"grant": 3, "conditional_grant": 2, "loan": 1}
 ACTIVITY_POINTS = {"kutatas_fejlesztes": 2, "infrastruktura_ingatlan": 3, "egyeb": 0}
 UNTIL_FUNDS_RUN_OUT = "keret_kimerulesig"
+LONGEST_DURATION = "maximalis"  # idotartam: the longest duration, more than 24 months (DEC-37)
 
 # DEC-31: tam_osszeg of TOP and TOP Plusz calls that state no amount.
 TOP_RULE_POINTS = {"TOP": 1, "TOP_PLUSZ": 2}
+
+# DEC-40: max_tam_int of a loan, whatever the call states: a loan is paid back in full.
+LOAN_RULE_POINTS = 0
+RULE_ORIGINS = ("top_rule", "loan_rule")  # points set by a rule, not from a value (ARC-04)
 
 # The points the manual (expert) source may give (Spec_L3_ScoreAndLabel.md §2.1).
 ALLOWED_POINTS = {f: frozenset({0, 1, 2, 3}) for f in FACTORS} | {
@@ -86,7 +91,7 @@ def domain_error(factor: str, value: Any) -> str | None:
         ok = n is not None and 0 <= n <= 100
     elif factor == "idotartam":
         n = as_number(value)
-        ok = n is not None and n > 0
+        ok = value == LONGEST_DURATION or (n is not None and n > 0)
     elif factor == "tam_tevekenyseg":
         ok = isinstance(value, list) and len(value) > 0 and all(v in ACTIVITY_POINTS for v in value)
     else:
@@ -106,6 +111,8 @@ def _band(factor: str, value: Any) -> int:
         return max(ACTIVITY_POINTS[v] for v in value)
     if factor == "bead_napok" and value == UNTIL_FUNDS_RUN_OUT:
         return 0  # the longest submission period, more than 30 days
+    if factor == "idotartam" and value == LONGEST_DURATION:
+        return 3  # the longest duration, more than 24 months (DEC-37)
     x = as_number(value)
     if factor == "tam_osszeg":
         if x <= 100_000_000:
@@ -150,20 +157,33 @@ def _band(factor: str, value: Any) -> int:
     raise ValueError(f"unknown factor {factor!r}")
 
 
-def points(factor: str, value: Any, programme: str | None = None) -> tuple[int | None, str | None]:
+def fin_form_of(value: Any = None, manual_points: int | None = None) -> str | None:
+    """The financing form of a document from its fin_form value, or from the expert's fin_form points."""
+    if value in FIN_FORM_POINTS:
+        return value
+    by_points = {p: form for form, p in FIN_FORM_POINTS.items()}
+    return by_points.get(manual_points)
+
+
+def points(
+    factor: str, value: Any, programme: str | None = None, fin_form: str | None = None
+) -> tuple[int | None, str | None]:
     """SPEC-L3-14: the points and their origin for one extracted value.
 
-    Applies the bands (SPEC-L3-01) and the TOP rule (SPEC-L3-04), but not imputation.
-    Returns ``(None, None)`` for a missing value that the TOP rule does not cover.
-    Raises ValueError for a value outside the factor's domain.
+    Applies the bands (SPEC-L3-01), the TOP rule (SPEC-L3-04) and the loan rule (DEC-40),
+    but not imputation. ``fin_form`` is the document's financing form: for a loan,
+    ``max_tam_int`` gets LOAN_RULE_POINTS whatever its value. Returns ``(None, None)`` for a
+    missing value that no rule covers. Raises ValueError for a value outside the factor's domain.
     """
+    error = None if value is None else domain_error(factor, value)
+    if error:
+        raise ValueError(error)
+    if factor == "max_tam_int" and fin_form == "loan":
+        return LOAN_RULE_POINTS, "loan_rule"
     if value is None:
         if factor == "tam_osszeg" and programme in TOP_RULE_POINTS:
             return TOP_RULE_POINTS[programme], "top_rule"
         return None, None
-    error = domain_error(factor, value)
-    if error:
-        raise ValueError(error)
     return _band(factor, value), "band"
 
 

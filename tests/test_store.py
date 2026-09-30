@@ -85,3 +85,19 @@ def test_file_store_never_overwrites(tmp_path):
         files.write_json(root, "reports/r1/a.json", {"x": 2})
     files.remove(root, "reports/r1/a.json")
     assert not (root / "reports/r1/a.json").exists()
+
+
+def test_a_resumed_run_records_the_code_version_that_continues_it(tmp_path):
+    conn = db.connect(tmp_path)
+    run_id = runs.start(conn, "C2", {})
+    with pytest.raises(ValueError, match="unfinished M1"):
+        runs.resume(conn, run_id, "M1")
+    runs.fail(conn, run_id, "stopped")
+    runs.resume(conn, run_id, "C2")
+    runs.resume(conn, run_id, "C2")
+    assert runs.get(conn, run_id)["status"] == "running"
+    assert len(runs.code_versions(conn, run_id)) == 3
+    assert [r[0] for r in conn.execute("SELECT resume FROM run_resumes WHERE run_id = ?", (run_id,))] == [1, 2]
+    runs.complete(conn, run_id)
+    with pytest.raises(ValueError, match="not an unfinished"):
+        runs.resume(conn, run_id, "C2")

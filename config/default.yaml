@@ -11,6 +11,7 @@ sources:
   old_database: ../20_GrantRiskEstimator/data/palyazat.db
   manual_zip: ../00_Archívum/Pipeline_V0/Pipeline_V0.zip
   gold_csv: ../20_GrantRiskEstimator/data/Gold_second.csv
+  old_baseline: ../20_GrantRiskEstimator/data/Gold_second_test_results_final.csv  # old regex points (column regex), SPEC-E1-02
 
 acquire:                   # C1; the import configuration (manual call codes, overrides, gold pins) comes with C1
   import_config: config/import.yaml
@@ -55,8 +56,7 @@ consolidate:               # L2
 label:                     # L3
   low_coverage_threshold: 5
 
-validate:                  # E1; the corpus LLM of SPEC-E1-06 is extract.llm.model
-  old_baseline: ../20_GrantRiskEstimator/data/Gold_second_test_results_final.csv  # old regex points (column regex), SPEC-E1-02
+validate:                  # E1; the corpus LLM of SPEC-E1-06 is extract.llm.model; the baseline is sources.old_baseline (DEC-42)
   old_baseline_renamed:    # calls renamed in the gold file since the baseline was recorded: old name → current name
     "GINOP Plusz-2.2.1-24": "GINOP Plusz-2.2.1-25"
 

@@ -294,7 +294,15 @@ def test_significance_against_the_best():
     assert set(tests) == {("e5", "logreg"), ("tfidf", "majority")}
     assert all(t["reference_representation"] == "tfidf" and t["n_folds"] == 25 for t in tests.values())
     assert tests[("e5", "logreg")]["mean_diff"] > 0 and tests[("e5", "logreg")]["p_value"] < 0.05
+    assert all(t["p_value"] <= t["p_holm"] <= 1 for t in tests.values())
     assert compute({("tfidf", "logreg"): noisy(0.9, 1)}, with_significance=False).significance == {}
+
+
+def test_holm_adjustment():
+    """DEC-52: Holm's step-down method, by hand: 0.005·4, 0.01·3, 0.03·2, then kept monotone."""
+    assert metrics.holm([0.01, 0.04, 0.03, 0.005]) == pytest.approx([0.03, 0.06, 0.06, 0.02])
+    assert metrics.holm([0.5, 0.9]) == pytest.approx([1.0, 1.0])  # capped at 1
+    assert metrics.holm([]) == []
 
 
 def test_label_distributions_add_up():

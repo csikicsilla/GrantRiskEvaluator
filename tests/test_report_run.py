@@ -136,7 +136,7 @@ def test_risk_dataset(built):
         assert float(r["normalised_score"].replace(",", ".")) == pytest.approx(l3[r["doc_id"]]["normalised_score"], abs=1e-4)
         assert r["predicted_label"] in ("low", "medium", "high") and r["repeats"] == "5"
         for f in FACTORS:
-            assert r[f"{f}_origin"] in ("band", "manual", "mean", "top_rule")
+            assert r[f"{f}_origin"] in ("band", "manual", "mean", "top_rule", "loan_rule")
     scores = [float(r["normalised_score"].replace(",", ".")) for r in rows]
     assert scores == sorted(scores, reverse=True)  # a ranked list (INT-GOAL-03)
     gold_doc = next(r for r in rows if r["doc_id"] == doc_id(GOLD[0][0]))
@@ -235,6 +235,7 @@ def test_appendix(built):
     assert f"--m2-run {ids['m2']}" in repro and f"--l2-run {ids['l2']}" in repro
     flow = read(data_root, ids["e3"], "appendix/data_flow.mmd")
     assert flow.startswith("flowchart TD") and ids["m2"] in flow
+    assert "L3 -- factor means, tercile cuts --> E1" in flow and "E1 -. preferred source per factor .-> L2" in flow
 
 
 # Spec_L3_ScoreAndLabel.md Appendix A.1: (factor, value, expected points).

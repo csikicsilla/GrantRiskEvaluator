@@ -251,3 +251,19 @@ def test_source_order():
 def test_nothing_to_evaluate():
     with pytest.raises(validate.E1InputError, match="no source"):
         validate.compute(list(DOCS.values()), {}, CUTS)
+
+
+# --- DEC-40: the loan rule in E1 ------------------------------------------------------------------
+
+
+def test_the_loan_rule_uses_the_sources_own_financing_form():
+    loan = Observation(status="found", value="loan")
+    stated = Observation(status="found", value=90)
+    assert validate.observed_points("max_tam_int", stated, "GINOP_PLUSZ", validate.source_fin_form(loan)) == (
+        0, "loan_rule", None)
+    assert validate.observed_points("max_tam_int", stated, "GINOP_PLUSZ", None) == (3, "band", None)
+    baseline_loan = Observation(status="found", points=1)  # the old regex recorded fin_form points
+    given = Observation(status="found", points=3)
+    assert validate.observed_points("max_tam_int", given, None, validate.source_fin_form(baseline_loan)) == (
+        0, "loan_rule", None)
+    assert validate.observed_points("max_tam_int", None, None, "loan") == (None, None, "document_missing_from_run")

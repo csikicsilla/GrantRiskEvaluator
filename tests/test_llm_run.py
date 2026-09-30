@@ -184,3 +184,105 @@ def test_estimate(conn, tmp_path):
     assert (result["documents"], result["requests"]) == (2, 2)
     assert result["usd_estimate"] > 0
     assert client.created == []  # counting only
+
+
+# --- DEC-56: the budget over the whole run, retries, and stored answers ---------------------------------
+
+
+def test_a_resumed_run_counts_what_it_spent_before(conn, tmp_path):
+    c2, _ = seed_c2(conn, {n: markdown(n) for n in "ABC"})
+    with pytest.raises(llm.BudgetReached):
+        llm.run(conn, {}, tmp_path / "data", FakeClient(), settings(budget_usd=0.001), c2_run_id=c2, confirmed=True)
+    run_id = conn.execute("SELECT run_id FROM runs WHERE stage = 'L1'").fetchone()[0]
+    client = FakeClient()
+    with pytest.raises(llm.BudgetReached):  # 0.002 USD spent before; one more document reaches 0.003
+        llm.run(conn, {}, tmp_path / "data", client, settings(budget_usd=0.003), c2_run_id=c2, confirmed=True,
+                resume_run_id=run_id)
+    assert len(client.created) == 1
+    assert [r[0] for r in conn.execute("SELECT resume FROM run_resumes WHERE run_id = ?", (run_id,))] == [1]
+
+
+class Interrupt(BaseException):
+    """Stands for Ctrl+C or a killed process."""
+
+
+def test_a_resumed_run_asks_again_for_the_documents_that_failed(conn, tmp_path):
+    c2, ids = seed_c2(conn, {n: markdown(n) for n in "ABC"})
+    order = sorted(ids, key=ids.get)  # the run takes the documents in doc_id order
+    first, last = order[0], order[-1]
+    client = FakeClient(fail_for=[f"{first} felhívás"])
+    create = client.messages.create
+
+    def create_or_stop(**params):
+        if f"{last} felhívás" in params["messages"][0]["content"]:
+            raise Interrupt()
+        return create(**params)
+
+    client.messages.create = create_or_stop
+    with pytest.raises(Interrupt):
+        llm.run(conn, {}, tmp_path / "data", client, settings(), c2_run_id=c2, confirmed=True)
+    run_id = conn.execute("SELECT run_id FROM runs WHERE stage = 'L1'").fetchone()[0]
+    stored = {r[0] for r in conn.execute("SELECT DISTINCT doc_id FROM factor_observations WHERE run_id = ?", (run_id,))}
+    assert ids[first] not in stored  # the failure waits for the end of the run
+    client = FakeClient()
+    llm.run(conn, {}, tmp_path / "data", client, settings(), c2_run_id=c2, confirmed=True, resume_run_id=run_id)
+    assert len(client.created) == 2  # the failed and the interrupted document
+    statuses = {r[0] for r in conn.execute(
+        "SELECT status FROM factor_observations WHERE run_id = ? AND doc_id = ?", (run_id, ids[first]))}
+    assert "error" not in statuses
+
+
+def cut_off_first(client, times=1):
+    """The first ``times`` answers stop at max_tokens."""
+    create, calls = client.messages.create, []
+
+    def create_cut(**params):
+        answer = create(**params)
+        calls.append(1)
+        if len(calls) <= times:
+            body = {**answer.to_dict(), "stop_reason": "max_tokens"}
+            return SimpleNamespace(to_dict=lambda: body)
+        return answer
+
+    client.messages.create = create_cut
+    return client
+
+
+def test_an_unusable_answer_is_asked_once_more(conn, tmp_path):
+    c2, ids = seed_c2(conn, {"A": markdown("A")})
+    client = cut_off_first(FakeClient())
+    run_id = llm.run(conn, {}, tmp_path / "data", client, settings(), c2_run_id=c2, doc_ids=[ids["A"]])
+    eloleg = conn.execute("SELECT * FROM factor_observations WHERE run_id = ? AND factor = 'eloleg'", (run_id,)).fetchone()
+    assert eloleg["status"] == "found" and eloleg["raw_response_path"].endswith("-a2.json")
+    assert len(client.created) == 2
+    assert (tmp_path / "data" / eloleg["raw_response_path"].replace("-a2.json", "-a1.json")).exists()  # kept
+
+
+def test_an_answer_is_asked_at_most_twice(conn, tmp_path):
+    c2, ids = seed_c2(conn, {"A": markdown("A")})
+    client = cut_off_first(FakeClient(), times=5)
+    first = llm.run(conn, {}, tmp_path / "data", client, settings(), c2_run_id=c2, doc_ids=[ids["A"]])
+    assert len(client.created) == 2
+    assert {r[0] for r in conn.execute("SELECT status FROM factor_observations WHERE run_id = ?", (first,))} == {"error"}
+    client = FakeClient()
+    llm.run(conn, {}, tmp_path / "data", client, settings(), c2_run_id=c2, doc_ids=[ids["A"]])
+    assert client.created == []  # both attempts are used up; a later run does not ask again
+
+
+def test_changed_request_settings_never_reuse_an_answer(conn, tmp_path):
+    c2, ids = seed_c2(conn, {"A": markdown("A")})
+    llm.run(conn, {}, tmp_path / "data", FakeClient(), settings(), c2_run_id=c2, doc_ids=[ids["A"]])
+    same, more_tokens = FakeClient(), FakeClient()
+    llm.run(conn, {}, tmp_path / "data", same, settings(), c2_run_id=c2, doc_ids=[ids["A"]])
+    llm.run(conn, {}, tmp_path / "data", more_tokens, settings(max_tokens=16000), c2_run_id=c2, doc_ids=[ids["A"]])
+    assert (len(same.created), len(more_tokens.created)) == (0, 1)
+
+
+def test_the_report_names_what_the_run_paid_for_and_what_it_skipped(conn, tmp_path):
+    c2, ids = seed_c2(conn, {"A": markdown("A")})
+    llm.run(conn, {}, tmp_path / "data", FakeClient(), settings(), c2_run_id=c2, doc_ids=[ids["A"]])
+    again = llm.run(conn, {}, tmp_path / "data", FakeClient(), settings(), c2_run_id=c2, doc_ids=[ids["A"], "0" * 16])
+    report = json.loads((tmp_path / "data" / runs.get(conn, again)["report_path"]).read_text(encoding="utf-8"))
+    assert report["cost_usd"] == pytest.approx(0.002) and report["cost_usd_paid_by_this_run"] == 0
+    assert report["skipped"] == [{"doc_id": "0" * 16, "reason": "not in the C2 run"}]
+    assert report["models_that_answered"] == ["test-model"]

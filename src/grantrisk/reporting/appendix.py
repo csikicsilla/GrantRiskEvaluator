@@ -116,6 +116,9 @@ BANDS: dict[str, list[Band]] = {
         Band(1, "12 felett, legfeljebb 18 hónap", "above 12, at most 18 months", F(12), False, F(18), True),
         Band(2, "18 felett, legfeljebb 24 hónap", "above 18, at most 24 months", F(18), False, F(24), True),
         Band(3, "24 hónap felett", "above 24 months", F(24), False, None),
+        Band(3, "maximális (az időtartam nem értelmezett, vagy a kérelem a befejezési határidőig benyújtható)",
+             "the longest (the duration is not defined, or applications are open until the completion deadline)",
+             values=(scoring.LONGEST_DURATION,)),
     ],
     "tam_tevekenyseg": [
         Band(0, "egyik sem (csak egyéb)", "neither (other only)", values=((EGYEB,),)),
@@ -159,6 +162,9 @@ def check_bands() -> None:
     for programme, points in scoring.TOP_RULE_POINTS.items():
         if scoring.points("tam_osszeg", None, programme)[0] != points:
             problems.append(f"TOP rule {programme}")
+    for value in (None, 90):
+        if scoring.points("max_tam_int", value, fin_form="loan")[0] != scoring.LOAN_RULE_POINTS:
+            problems.append(f"loan rule, max_tam_int {value!r}")
     if problems:
         raise AppendixError("appendix 8.1 disagrees with the scoring module:\n  " + "\n  ".join(problems))
 
@@ -181,6 +187,9 @@ def scoring_table(data: Data, today: str) -> str:
         "",
         f"**TOP rule (DEC-31):** a TOP or TOP Plusz call that states no maximum amount gets fixed points for "
         f"`tam_osszeg` ({top}); a stated amount is scored by the bands.",
+        "",
+        f"**Loan rule (DEC-40):** a loan (`fin_form` = loan) gets {scoring.LOAN_RULE_POINTS} points for `max_tam_int`, "
+        "whatever the call states, because a loan is paid back in full.",
         "",
         "**Missing values (Spec_ScoringSystem.md §1.3):** a factor that was not determined gets the mean of its points "
         "over the documents where it was determined.",
@@ -329,7 +338,11 @@ def generative_ai(conn: sqlite3.Connection, data: Data, data_root, today: str) -
 
 
 def data_flow(data: Data, today: str) -> str:
-    """The stage diagram of Spec_Architecture.md §3 as Mermaid source, with the runs of this chain."""
+    """The stage diagram of Spec_Architecture.md §3 as Mermaid source, with the runs of this chain.
+
+    It includes the loop of DEC-54 and DEC-59: E1 labels the gold documents with L3's means and
+    cut scores, and suggests the preferred source per factor that L2 uses.
+    """
     runs_ = data.chain.runs()
 
     def node(code: str, name: str) -> str:
@@ -349,7 +362,10 @@ def data_flow(data: Data, today: str) -> str:
         "    M1 --> " + node("M2", "Train & predict"),
         "    L3 -- tercile label --> M2",
         "    L1 --> " + node("E1", "Validate extraction"),
+        "    L3 -- factor means, tercile cuts --> E1",
+        "    E1 -. preferred source per factor .-> L2",
         "    M2 --> " + node("E2", "Evaluate models"),
+        "    L3 -- tercile and fixed labels --> E2",
         '    E1 --> E3["E3 Report"]',
         "    E2 --> E3",
     ]

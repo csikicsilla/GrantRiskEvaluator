@@ -227,16 +227,18 @@ def significance_tables(data: Data, today: str) -> tuple[str | None, str]:
         return None, md_document("Significance", ["Not run."], data, stages, today)
     rows = data.significance
     body = ["Corrected resampled t-test (Nadeau and Bengio, 2003) on the 25 paired fold differences of macro-F1 "
-            "(the best model run minus the other); two-sided. No correction for multiple comparisons is applied.", "",
-            *md_table(["Model run", "Reference", "Mean diff.", "SD diff.", "t", "df", "p"],
+            "(the best model run minus the other); two-sided. p: unadjusted. p (Holm): adjusted for the "
+            f"{len(rows)} comparisons with Holm's step-down method (DEC-52); read this one when judging a difference.", "",
+            *md_table(["Model run", "Reference", "Mean diff.", "SD diff.", "t", "df", "p", "p (Holm)"],
                       [[model_name((r["scheme"], r["representation"], r["classifier"])),
                         f"{r['reference_representation']}/{r['reference_classifier']}", fmt(r["mean_diff"]),
-                        fmt(r["sd_diff"]), fmt(r["t_stat"], 2), str(r["df"]), fmt(r["p_value"], 4)] for r in rows])]
+                        fmt(r["sd_diff"]), fmt(r["t_stat"], 2), str(r["df"]), fmt(r["p_value"], 4),
+                        fmt(r["p_holm"], 4)] for r in rows])]
     csv = csv_text(["scheme", "representation", "classifier", "reference_representation", "reference_classifier",
-                    "n_folds", "mean_diff", "sd_diff", "t_stat", "df", "p_value"],
+                    "n_folds", "mean_diff", "sd_diff", "t_stat", "df", "p_value", "p_holm"],
                    [[r["scheme"], r["representation"], r["classifier"], r["reference_representation"],
                      r["reference_classifier"], r["n_folds"], rounded(r["mean_diff"]), rounded(r["sd_diff"]),
-                     rounded(r["t_stat"]), r["df"], rounded(r["p_value"], 6)] for r in rows])
+                     rounded(r["t_stat"]), r["df"], rounded(r["p_value"], 6), rounded(r["p_holm"], 6)] for r in rows])
     return csv, md_document("Significance", body, data, stages, today)
 
 

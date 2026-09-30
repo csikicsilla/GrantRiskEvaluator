@@ -257,6 +257,22 @@ def corrected_t_test(differences: Sequence[float], test_train_ratio: float) -> d
     return {"mean_diff": mean, "sd_diff": math.sqrt(var), "t": t, "df": df, "p_value": float(2 * stats.t.sf(abs(t), df))}
 
 
+def holm(p_values: Sequence[float]) -> list[float]:
+    """Holm's step-down adjustment of ``p_values`` for multiple comparisons, in the input order (DEC-52).
+
+    The i-th smallest of m p-values is multiplied by m - i + 1; the adjusted values are then
+    made monotone in that order and capped at 1.
+    """
+    m = len(p_values)
+    order = sorted(range(m), key=lambda i: p_values[i])
+    adjusted = [0.0] * m
+    running = 0.0
+    for rank, i in enumerate(order):
+        running = max(running, min(1.0, (m - rank) * p_values[i]))
+        adjusted[i] = running
+    return adjusted
+
+
 def error_table(repeat_scores: Mapping[int, Scores]) -> dict[str, dict[str, float | None]]:
     """SPEC-E2-04: per error size, the number of predictions averaged over the repeats, and its spread."""
     out = {}

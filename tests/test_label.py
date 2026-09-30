@@ -25,8 +25,8 @@ def test_imputation_example():
     assert result.report["factor_means"]["idotartam"]["n_determined"] == 3
     assert d4.factors["idotartam"].points == 2
     assert d4.factors["idotartam"].origin == "mean"
-    assert d4.total == 4  # fin_form 1 + idotartam 2 + eloleg 1
-    assert d4.normalised == Fraction(40, 3)
+    assert d4.total == 5  # fin_form 2 (conditional grant, DEC-40) + idotartam 2 + eloleg 1
+    assert d4.normalised == Fraction(50, 3)
 
 
 def test_all_points_three_give_the_maximum():
@@ -218,3 +218,28 @@ def test_totals_are_exact_fractions():
     d = {r.doc_id: r for r in compute(docs).documents}["D"]
     assert d.factors["idotartam"].points == Fraction(5, 3)
     assert isinstance(d.total, Fraction)
+
+
+# --- DEC-40: the loan rule ------------------------------------------------------------------------
+
+
+def test_loan_rule_sets_intensity_and_is_left_out_of_the_mean():
+    docs = [
+        doc("D1", max_tam_int=20),                         # 0 points, band
+        doc("D2", max_tam_int=80),                         # 3 points, band
+        doc("D3", fin_form="loan", max_tam_int=90),        # the stated 90 % does not count
+        doc("D4", fin_form="loan", max_tam_int=None),
+        doc("D5", fin_form=FactorInput(points=1), max_tam_int=None),  # the expert's fin_form points say loan
+        doc("D6", max_tam_int=None),                       # imputed from D1 and D2 only
+    ]
+    result = {r.doc_id: r for r in compute(docs).documents}
+    assert [(result[d].factors["max_tam_int"].points, result[d].factors["max_tam_int"].origin)
+            for d in ("D1", "D2", "D3", "D4", "D5", "D6")] == [
+        (0, "band"), (3, "band"), (0, "loan_rule"), (0, "loan_rule"), (0, "loan_rule"), (Fraction(3, 2), "mean")]
+    assert result["D3"].n_determined == result["D1"].n_determined - 1  # a rule is not a determined value
+
+
+def test_manual_intensity_points_are_not_affected_by_the_loan_rule():
+    docs = [doc("D1"), doc("D2", fin_form="loan", max_tam_int=FactorInput(points=2))]
+    r = {r.doc_id: r for r in compute(docs).documents}["D2"]
+    assert (r.factors["max_tam_int"].points, r.factors["max_tam_int"].origin) == (2, "manual")

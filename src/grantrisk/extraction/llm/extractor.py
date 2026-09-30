@@ -15,7 +15,7 @@ from typing import Any
 
 from grantrisk.extraction import evidence
 from grantrisk.labelling import scoring
-from grantrisk.labelling.scoring import FACTORS, UNTIL_FUNDS_RUN_OUT
+from grantrisk.labelling.scoring import FACTORS, LONGEST_DURATION, UNTIL_FUNDS_RUN_OUT
 
 ACTIVITIES = list(scoring.ACTIVITY_POINTS)
 
@@ -38,7 +38,7 @@ def output_schema() -> dict[str, Any]:
         "bead_napok": {"anyOf": [{"type": "integer"}, {"type": "string", "enum": [UNTIL_FUNDS_RUN_OUT]}, {"type": "null"}]},
         "max_tam_int": _nullable({"type": "number"}),
         "eloleg": _nullable({"type": "number"}),
-        "idotartam": _nullable({"type": "number"}),
+        "idotartam": {"anyOf": [{"type": "number"}, {"type": "string", "enum": [LONGEST_DURATION]}, {"type": "null"}]},
         "tam_tevekenyseg": _nullable({"type": "array", "items": {"type": "string", "enum": ACTIVITIES}}),
         "egysz_elszam": flag,
         "biztositek": flag,

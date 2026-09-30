@@ -79,13 +79,25 @@ def test_observations():
     [
         ("A FELHÍVÁS célja   a vállalkozások", 1),  # case and whitespace
         ("előleg mértéke 50%", 2),  # Markdown emphasis in the text
-        ("Mennyi előleg igényelhető? ... 50%", 2),  # shortened with an ellipsis
+        ("Mennyi előleg igényelhető? … Az előleg mértéke 50%", 2),  # shortened; every piece is long (DEC-55)
+        ("Mennyi előleg igényelhető? ... 50%", None),  # "50%" is too short to prove anything
+        ("A felhívás célja … 50%.", None),
+        ("vállalkozások támogatása. Kérdés Válasz", 1),  # across a page break: the page where it starts
         ("ez nincs a szövegben", None),
         ("", None),
     ],
 )
 def test_find_page(quote, page):
     assert evidence.find_page(evidence.pages(MD), quote) == page
+
+
+def test_an_ellipsis_stands_for_a_limited_stretch_of_text():
+    def md(words):
+        return "<!-- page 1 -->\nA támogatás maximális összege " + "szöveg " * words + "legfeljebb 50 000 000 Ft lehet.\n"
+
+    quote = "A támogatás maximális összege … legfeljebb 50 000 000 Ft lehet."
+    assert evidence.find_page(evidence.pages(md(30)), quote) == 1  # 210 characters left out
+    assert evidence.find_page(evidence.pages(md(100)), quote) is None  # 700 characters left out
 
 
 def test_split_and_plan_parts():

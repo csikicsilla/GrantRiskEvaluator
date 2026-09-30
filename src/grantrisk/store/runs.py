@@ -74,6 +74,24 @@ def start(
     return run_id
 
 
+def resume(conn: sqlite3.Connection, run_id: str, stage: str) -> None:
+    """Continue an unfinished run of ``stage``, and record the code version that continues it (DEC-57)."""
+    row = get(conn, run_id)
+    if row is None or row["stage"] != stage or row["status"] == "complete":
+        raise ValueError(f"run {run_id} is not an unfinished {stage} run")
+    with transaction(conn):
+        n = conn.execute("SELECT COUNT(*) FROM run_resumes WHERE run_id = ?", (run_id,)).fetchone()[0]
+        conn.execute("INSERT INTO run_resumes VALUES (?, ?, ?, ?)", (run_id, n + 1, _now(), code_version()))
+        conn.execute("UPDATE runs SET status = 'running', error = NULL WHERE run_id = ?", (run_id,))
+
+
+def code_versions(conn: sqlite3.Connection, run_id: str) -> list[str]:
+    """The code versions that produced a run: the one it started with, then one per resumption."""
+    first = conn.execute("SELECT code_version FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+    resumed = conn.execute("SELECT code_version FROM run_resumes WHERE run_id = ? ORDER BY resume", (run_id,))
+    return ([first[0]] if first else []) + [r[0] for r in resumed]
+
+
 def complete(conn: sqlite3.Connection, run_id: str, report_path: str | None = None) -> None:
     """Mark a run complete. Call it inside the transaction that writes the run's output."""
     conn.execute(

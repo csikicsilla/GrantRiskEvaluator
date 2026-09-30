@@ -92,7 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--l3-run", required=True, help="the L3 run whose tercile cuts label the gold documents")
     validate.add_argument("--c1-run", required=True, help="the C1 run that holds the documents' programmes")
     validate.add_argument("--extraction-runs", default="", help="L1 runs of the automated extractors, comma-separated")
-    validate.add_argument("--no-baseline", action="store_true", help="leave out the old regex baseline (validate.old_baseline)")
+    validate.add_argument("--no-baseline", action="store_true", help="leave out the old regex baseline (sources.old_baseline)")
 
     evaluate = stage_parsers["evaluate"]
     evaluate.add_argument("--m2-run", required=True, help="the M2 run whose predictions are evaluated")
@@ -275,7 +275,7 @@ def _report(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
 def _validate(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
     from grantrisk.evaluation import validate
 
-    baseline = None if args.no_baseline else cfg.resolve(cfg.values["validate"]["old_baseline"])
+    baseline = None if args.no_baseline else cfg.source("old_baseline")
     return validate.run(
         conn, cfg.values, cfg.data_root, manual_run_id=args.manual_run,
         extraction_run_ids=_names(args.extraction_runs) or [], l3_run_id=args.l3_run,
@@ -386,7 +386,7 @@ def _run_all(cfg: config_mod.Config, args: argparse.Namespace) -> int:
         regex_run = step("L1 regex", lambda: regex.run(conn, values, root, c2_run_id=c2, progress=progress))
         llm_run = reuse("L1 llm", args.llm_run, "L1") if args.llm_run else None
         extraction_runs = [regex_run, *([llm_run] if llm_run else [])]
-        baseline = None if args.no_baseline else cfg.resolve(values["validate"]["old_baseline"])
+        baseline = None if args.no_baseline else cfg.source("old_baseline")
 
         labelling_values = values
         if not (values.get("consolidate") or {}).get("preferred_source"):

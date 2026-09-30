@@ -7,9 +7,10 @@ from grantrisk.labelling.scoring import FACTORS
 from grantrisk.store import runs
 from grantrisk.store.db import transaction
 
-# Values that score 0 points, except fin_form, which cannot: loan scores 1.
+# Values that score 0 points, except fin_form, which cannot. Not a loan, whose max_tam_int the
+# loan rule would set (DEC-40): conditional_grant, 2 points.
 BASE_VALUES = {
-    "fin_form": "loan",
+    "fin_form": "conditional_grant",
     "tam_osszeg": 50_000_000,
     "konzorcium": 0,
     "bead_napok": 40,
@@ -20,7 +21,7 @@ BASE_VALUES = {
     "egysz_elszam": 1,
     "biztositek": 1,
 }
-BASE_TOTAL = 1
+BASE_TOTAL = 2
 
 
 def doc(doc_id, programme="GINOP_PLUSZ", **values):

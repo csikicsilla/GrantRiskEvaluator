@@ -218,14 +218,23 @@ def quadratic_kappa(pairs: Sequence[tuple[int, int]], k: int = 3) -> Fraction | 
 # --- SPEC-E1-01: points and categories -------------------------------------------------------
 
 
+def source_fin_form(observation: Observation | None) -> str | None:
+    """A source's own financing form of a document, for the loan rule (DEC-40): its value, or the baseline's points."""
+    if observation is None or observation.status != "found":
+        return None
+    return scoring.fin_form_of(observation.value, observation.points)
+
+
 def observed_points(
-    factor: str, observation: Observation | None, programme: str | None
+    factor: str, observation: Observation | None, programme: str | None, fin_form: str | None = None
 ) -> tuple[int | None, str | None, str | None]:
     """(points, origin, note) of one observation, as L3 would determine them (SPEC-L3-14).
 
     A value that gives no points is treated as not found, with a note saying why. A
-    missing value still gets points from the TOP rule where it applies (DEC-31). A
-    document missing from the run gives no points at all (§4 of the chapter).
+    missing value still gets points from the TOP rule where it applies (DEC-31). The loan
+    rule (DEC-40) sets ``max_tam_int`` of the documents the source itself finds to be
+    loans, also over the baseline's recorded points. A document missing from the run gives
+    no points at all (§4 of the chapter).
     """
     note = None
     value = None
@@ -233,19 +242,23 @@ def observed_points(
         return None, None, "document_missing_from_run"
     if observation.status == "found":
         if observation.points is not None:  # the baseline recorded points, not values
+            if factor == "max_tam_int" and fin_form == "loan":
+                return scoring.LOAN_RULE_POINTS, "loan_rule", None
             return observation.points, "given", None
         value = observation.value
         if factor == "tam_tevekenyseg" and value == []:
             note, value = "empty_activity_list", None  # DEC-33
         elif value is not None and scoring.domain_error(factor, value):
             note, value = f"out_of_domain: {value!r}", None
-    points, origin = scoring.points(factor, value, programme)
+    points, origin = scoring.points(factor, value, programme, fin_form)
     return points, origin, note
 
 
-def classify(source: str, doc: GoldDocument, factor: str, observation: Observation | None) -> Cell:
+def classify(
+    source: str, doc: GoldDocument, factor: str, observation: Observation | None, fin_form: str | None = None
+) -> Cell:
     """SPEC-E1-01: count one gold cell into exactly one category."""
-    points, origin, note = observed_points(factor, observation, doc.programme)
+    points, origin, note = observed_points(factor, observation, doc.programme, fin_form)
     gold = doc.points[factor]
     if gold is None:
         category = "not_comparable"
@@ -273,7 +286,7 @@ def document_label(
 ) -> DocumentLabel:
     """The label of one document from one source's (points, origin) per factor; missing points get the means."""
     filled = {f: Fraction(p) if p is not None else cuts.means[f] for f, (p, _) in points.items()}
-    n_determined = sum(p is not None and origin != "top_rule" for p, origin in points.values())
+    n_determined = sum(p is not None and origin not in scoring.RULE_ORIGINS for p, origin in points.values())
     total = sum((filled[f] for f in FACTORS), Fraction(0))
     normalised = scoring.normalised(total)
     _, fixed = scoring.fixed_label(normalised)
@@ -365,7 +378,8 @@ def compute(
     docs = sorted(gold_docs, key=lambda d: d.doc_id)
     order = source_order(sources)
 
-    cells = [classify(s, d, f, sources[s].get((d.doc_id, f))) for s in order for d in docs for f in FACTORS]
+    cells = [classify(s, d, f, sources[s].get((d.doc_id, f)), source_fin_form(sources[s].get((d.doc_id, "fin_form"))))
+             for s in order for d in docs for f in FACTORS]
 
     tallies: dict[tuple[str, str, str], Tally] = {
         (s, f, subset): Tally() for s in order for f in (*FACTORS, ALL) for subset in SUBSETS

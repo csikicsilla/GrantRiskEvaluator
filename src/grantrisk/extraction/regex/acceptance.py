@@ -47,13 +47,10 @@ def read_old_baseline(path: Path, renames: Mapping[str, str] | None = None) -> d
 
 
 def points_of(observations: Mapping[str, Any], programme: str | None) -> dict[str, int | None]:
-    """The points of each factor from the extracted values, with the TOP rule, without imputation."""
-    result = {}
-    for f in FACTORS:
-        o = observations[f]
-        value = o.value if o.status == "found" else None
-        result[f] = scoring.points(f, value, programme)[0]
-    return result
+    """The points of each factor from the extracted values, with the TOP and loan rules, without imputation."""
+    values = {f: (o.value if o.status == "found" else None) for f, o in observations.items()}
+    fin_form = scoring.fin_form_of(values["fin_form"])
+    return {f: scoring.points(f, values[f], programme, fin_form)[0] for f in FACTORS}
 
 
 def agreement(pairs: Sequence[tuple[int | None, int | None]]) -> dict[str, int]:

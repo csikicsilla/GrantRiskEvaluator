@@ -119,3 +119,35 @@ def test_normalised():
 
 def test_rules_version_is_set():
     assert scoring.RULES_VERSION
+
+
+# --- DEC-40: the loan rule ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", [None, 0, 70, 90, 100])
+def test_a_loan_gets_zero_points_for_intensity_whatever_the_call_states(value):
+    assert scoring.points("max_tam_int", value, fin_form="loan") == (0, "loan_rule")
+
+
+def test_the_loan_rule_applies_only_to_loans_and_to_intensity():
+    assert scoring.points("max_tam_int", 90, fin_form="grant") == (3, "band")
+    assert scoring.points("max_tam_int", None, fin_form="conditional_grant") == (None, None)
+    assert scoring.points("eloleg", 100, fin_form="loan") == (3, "band")
+
+
+def test_the_loan_rule_still_rejects_a_value_outside_the_domain():
+    with pytest.raises(ValueError):
+        scoring.points("max_tam_int", 150, fin_form="loan")
+
+
+def test_the_longest_duration_scores_three():
+    """DEC-37: idotartam 'maximalis' is more than 24 months."""
+    assert scoring.points("idotartam", "maximalis") == (3, "band")
+    assert scoring.domain_error("idotartam", "hosszu") is not None
+
+
+def test_fin_form_from_a_value_or_from_the_experts_points():
+    assert scoring.fin_form_of("loan") == "loan"
+    assert scoring.fin_form_of(None, 1) == "loan"
+    assert scoring.fin_form_of(None, 3) == "grant"
+    assert scoring.fin_form_of() is None

@@ -307,6 +307,13 @@ def test_advance_of_a_loan_is_100():
     assert (finding.value, finding.warnings) == (100, ["loan"])
 
 
+def test_advance_of_a_loan_without_the_loan_label_is_100():
+    """DEC-40: whenever fin_form is a loan, not only with the loan programme's field label."""
+    text = "### A támogatás formája\nA támogatás visszatérítendő támogatásnak minősül. Az előleg mértéke 50%."
+    finding = rules.eloleg(doc(text))
+    assert (finding.value, finding.warnings) == (100, ["loan"])
+
+
 @pytest.mark.parametrize("answer", ["nem releváns", "Jelen felhívás keretében előleg igénylésére nincs mód."])
 def test_advance_not_available_is_0(answer):
     assert value(rules.eloleg, summary(ADVANCE_Q, answer)) == 0
@@ -340,9 +347,71 @@ def test_duration_largest_number_of_months():
     assert value(rules.idotartam, summary("Mennyi a projekt végrehajtására rendelkezésre álló időtartam?", answer)) == 18
 
 
-def test_duration_given_as_a_date_is_not_a_duration():
-    answer = "A projekt fizikai befejezésének határideje legkésőbb 2027.12.31."
-    assert value(rules.idotartam, summary("Mennyi a projekt végrehajtására rendelkezésre álló időtartam?", answer)) == "not_found"
+DURATION_Q = "Mennyi a projekt végrehajtására rendelkezésre álló időtartam?"
+DEADLINE = "A projekt fizikai befejezésének határideje legkésőbb 2027.12.31."
+
+
+def test_duration_from_a_deadline_date_without_a_submission_date_is_not_found():
+    finding = rules.idotartam(doc(summary(DURATION_Q, DEADLINE)))
+    assert (finding.status, finding.warnings) == ("not_found", ["deadline_without_submission_date"])
+
+
+def test_duration_from_the_last_submission_date_to_the_deadline():
+    """DEC-37 (b): the shortest time a project can have, from the closing date of the last stage."""
+    submission = (
+        "## 1.3. Mikor lehet benyújtani a támogatási kérelmet?\n"
+        "Első szakasz: 2023. szeptember 1. – 2023. október 2. Második szakasz: 2023. október 20. – 2023. november 10."
+    )
+    finding = rules.idotartam(doc(submission, summary(DURATION_Q, DEADLINE)))
+    assert (finding.status, finding.value) == ("found", 49.7)  # 2023-11-10 → 2027-12-31
+    assert finding.warnings == ["months_from_dates: 2023-11-10 → 2027-12-31"]
+
+
+def test_duration_of_whole_months_from_dates():
+    submission = "## Mikor lehet benyújtani a támogatási kérelmet?\nA kérelmek 2027.10.01. – 2027.12.31. között nyújthatók be."
+    text = summary(DURATION_Q, "A projekt fizikai befejezésének határideje: 2029. december 31.")
+    assert value(rules.idotartam, submission, text) == 24  # exactly 24 months: 2 points (DEC-13)
+
+
+def test_a_duration_that_is_not_defined_is_the_longest():
+    text = ("## A projekt végrehajtására rendelkezésre álló időtartam\nA projekt fizikai befejezésére rendelkezésre "
+            "álló időtartam meghatározása jelen Felhívás esetében nem értelmezett.")
+    finding = rules.idotartam(doc(text))
+    assert (finding.value, finding.warnings) == ("maximalis", ["duration_not_defined"])
+
+
+def test_submission_open_until_the_deadline_is_the_longest_duration():
+    submission = "## Mikor lehet benyújtani a támogatási kérelmet?\n2023.03.01. – 2029.12.31."
+    answer = "A projekt fizikai befejezésének határideje reális véghatáridő, de legkésőbb 2029.12.31."
+    finding = rules.idotartam(doc(submission, summary(DURATION_Q, answer)))
+    assert (finding.value, finding.warnings) == ("maximalis", ["submission_open_until_deadline: 2029-12-31"])
+
+
+def test_a_single_closing_date_is_a_submission_date():
+    submission = ("### 4.3 A támogatási kérelem benyújtásának határideje és módja\n"
+                  "A támogatási kérelmek benyújtása a Felhívás megjelenésétől 2016. május 31-ig lehetséges.")
+    answer = "A projekt fizikai befejezésére a projekt megkezdését követően legfeljebb 2023. december 31-ig van lehetőség."
+    assert value(rules.idotartam, submission, summary(DURATION_Q, answer)) == 91  # 2016-05-31 → 2023-12-31
+
+
+def test_a_start_date_is_not_a_deadline():
+    submission = "## Mikor lehet benyújtani a támogatási kérelmet?\nA kérelmek 2016. május 31-ig nyújthatók be."
+    answer = "Az elszámolhatósági időszak kezdete nem lehet korábbi, mint 2016.01.01."
+    assert value(rules.idotartam, submission, summary(DURATION_Q, answer)) == "not_found"
+
+
+def test_stated_months_win_over_a_deadline_date():
+    submission = "## Mikor lehet benyújtani a támogatási kérelmet?\n2023.10.20. – 2023.11.10."
+    answer = "A projekt fizikai befejezésére 18 hónap áll rendelkezésre, legkésőbb 2027.12.31-ig."
+    assert value(rules.idotartam, submission, summary(DURATION_Q, answer)) == 18
+
+
+def test_months_between():
+    from datetime import date
+
+    assert rules.months_between(date(2027, 12, 31), date(2029, 12, 31)) == 24
+    assert rules.months_between(date(2017, 4, 21), date(2019, 6, 30)) == 26.3
+    assert rules.months_between(date(2024, 1, 31), date(2024, 3, 1)) == 1
 
 
 def test_duration_ignores_an_extension():

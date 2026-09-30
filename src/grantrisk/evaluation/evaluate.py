@@ -247,6 +247,8 @@ def significance(evaluations: Sequence[ModelEvaluation], rows: Sequence[Mapping[
         out.append({"scheme": r["scheme"], "representation": r["representation"], "classifier": r["classifier"],
                     "reference_representation": reference.key[1], "reference_classifier": reference.key[2],
                     "n_folds": len(diffs), **test})
+    for t, p in zip(out, m.holm([t["p_value"] for t in out])):  # DEC-52: over the comparisons of this scheme
+        t["p_holm"] = p
     return out
 
 
@@ -336,7 +338,8 @@ def json_report(result: E2Result, meta: Mapping[str, Any]) -> dict[str, Any]:
             "not_above_baseline": "mean macro-F1 not above that of the majority baseline on the same representation",
             "grid": "representation means leave out the baseline; classifier means run over the representations",
             "significance": "corrected resampled t-test (Nadeau and Bengio, 2003) on the paired fold differences of "
-                            "macro-F1, the first best model run minus the other; two-sided",
+                            "macro-F1, the first best model run minus the other; two-sided; p_holm: adjusted for the "
+                            "comparisons of the scheme with Holm's step-down method (DEC-52)",
             "roc_curves": f"pooled over the repeats; TPR at {m.ROC_GRID} FPR points, linear between the ROC vertices",
         },
         "comparison": result.comparison,
@@ -430,9 +433,12 @@ def _insert(conn: sqlite3.Connection, run_id: str, result: E2Result) -> None:
          for s, rows in result.grid.items() for g in rows],
     )
     conn.executemany(
-        "INSERT INTO significance VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO significance (run_id, scheme, representation, classifier, reference_representation,"
+        " reference_classifier, n_folds, mean_diff, sd_diff, t_stat, df, p_value, p_holm)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [(run_id, t["scheme"], t["representation"], t["classifier"], t["reference_representation"],
-          t["reference_classifier"], t["n_folds"], t["mean_diff"], t["sd_diff"], t["t"], t["df"], t["p_value"])
+          t["reference_classifier"], t["n_folds"], t["mean_diff"], t["sd_diff"], t["t"], t["df"], t["p_value"],
+          t["p_holm"])
          for rows in result.significance.values() for t in rows],
     )
     conn.executemany(

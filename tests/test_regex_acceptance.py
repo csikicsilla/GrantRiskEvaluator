@@ -71,7 +71,7 @@ def _real_gold_documents():
         if c2 is None:
             pytest.skip("no complete C2 run holds all gold texts yet")
         validate = cfg.values["validate"]
-        baseline = cfg.resolve(validate["old_baseline"])
+        baseline = cfg.source("old_baseline")
         if not Path(baseline).exists() or not cfg.source("gold_csv").exists():
             pytest.skip("the old baseline or the gold file is not available")
         return acceptance.gold_documents(
