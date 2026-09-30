@@ -54,8 +54,18 @@ extract:                   # L1
         prices_per_mtok: {input: 2.00, output: 10.00}
 
 consolidate:               # L2
-  preferred_source: {}     # per factor, llm or regex, filled from the E1 report (SPEC-L2-03)
-  preferences_from_e1_run: null
+  preferred_source:        # per factor, llm or regex, from the E1 report (SPEC-L2-03); accepted by the expert (DEC-62)
+    fin_form: llm
+    tam_osszeg: llm
+    konzorcium: regex
+    bead_napok: regex
+    max_tam_int: llm
+    eloleg: regex
+    idotartam: regex
+    tam_tevekenyseg: regex
+    egysz_elszam: llm
+    biztositek: regex
+  preferences_from_e1_run: E1-20260930T143543-e8401f
 
 label:                     # L3
   low_coverage_threshold: 5
