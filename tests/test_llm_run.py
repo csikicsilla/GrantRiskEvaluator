@@ -286,3 +286,11 @@ def test_the_report_names_what_the_run_paid_for_and_what_it_skipped(conn, tmp_pa
     assert report["cost_usd"] == pytest.approx(0.002) and report["cost_usd_paid_by_this_run"] == 0
     assert report["skipped"] == [{"doc_id": "0" * 16, "reason": "not in the C2 run"}]
     assert report["models_that_answered"] == ["test-model"]
+
+
+def test_the_run_records_its_budget_ceiling(conn, tmp_path):
+    c2, ids = seed_c2(conn, {"A": markdown("A")})
+    run_id = llm.run(conn, {}, tmp_path / "data", FakeClient(), settings(budget_usd=4.0), c2_run_id=c2, doc_ids=[ids["A"]])
+    assert json.loads(runs.get(conn, run_id)["config_json"])["llm_run"]["budget_usd"] == 4.0
+    report = json.loads((tmp_path / "data" / runs.get(conn, run_id)["report_path"]).read_text(encoding="utf-8"))
+    assert report["budget_usd"] == 4.0

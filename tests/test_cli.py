@@ -31,3 +31,9 @@ def test_unknown_command_is_rejected():
     with pytest.raises(SystemExit) as exc:
         cli.main(["no-such-stage"])
     assert exc.value.code == 2
+
+
+def test_extract_takes_a_budget_ceiling():
+    args = cli.build_parser().parse_args(
+        ["extract", "--extractor", "llm", "--c2-run", "x", "--gold-only", "--budget-usd", "4"])
+    assert args.budget_usd == 4.0

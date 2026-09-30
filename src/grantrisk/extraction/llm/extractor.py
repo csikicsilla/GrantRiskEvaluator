@@ -76,6 +76,8 @@ def build_request(
         params["temperature"] = temperature
     if thinking == "disabled":
         params["thinking"] = {"type": "disabled"}
+    elif thinking == "between_tools":  # thinking off on models that reject "disabled", e.g. Sonnet 5.5
+        params["thinking"] = {"type": "between_tools"}
     return params
 
 

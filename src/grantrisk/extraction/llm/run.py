@@ -367,7 +367,7 @@ def run(
     else:
         snapshot = {**config_values, "llm_run": {"model": s.model, "prompt_version": s.prompt_version,
                                                   "prompt_sha256": s.prompt_sha256, "request_sha256": s.request_sha256,
-                                                  "doc_filter": doc_ids is not None}}
+                                                  "budget_usd": s.budget_usd, "doc_filter": doc_ids is not None}}
         run_id = runs.start(conn, "L1", snapshot, inputs=[c2_run_id])
     try:
         done = {r[0] for r in conn.execute("SELECT DISTINCT doc_id FROM factor_observations WHERE run_id = ?", (run_id,))}
@@ -438,6 +438,7 @@ def _report(conn, run_id, c2_run_id, s: Settings, data_root: Path, spent_now: fl
         "prompt_sha256": s.prompt_sha256,
         "request_settings": {"max_tokens": s.max_tokens, "temperature": s.temperature, "thinking": s.thinking,
                              "request_sha256": s.request_sha256},
+        "budget_usd": s.budget_usd,
         "documents": n_docs,
         "failed_documents": failed,
         "skipped": skipped,

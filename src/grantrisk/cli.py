@@ -61,6 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--confirm", action="store_true", help="llm: confirm a run over the whole corpus")
     extract.add_argument("--resume", help="llm: an unfinished L1 run to continue")
     extract.add_argument("--reparse", action="store_true", help="llm: parse stored responses only, without the API")
+    extract.add_argument("--budget-usd", type=float,
+                         help="llm: the ceiling of this run in USD (default: extract.llm.budget_usd, SPEC-L1-11)")
 
     consolidate = stage_parsers["consolidate"]
     consolidate.add_argument("--manual-run", required=True, help="the L1 run of the manual (gold) import")
@@ -201,6 +203,10 @@ def _extract_llm(conn, cfg: config_mod.Config, args: argparse.Namespace, pins: d
     from grantrisk.extraction.llm import run as llm
 
     settings = llm.settings_from_config(cfg.values, cfg.resolve, args.model)
+    if args.budget_usd is not None:
+        import dataclasses
+
+        settings = dataclasses.replace(settings, budget_usd=args.budget_usd)
     doc_ids = _gold_doc_ids(pins, args.gold_only)
     client = None
     if not args.reparse:

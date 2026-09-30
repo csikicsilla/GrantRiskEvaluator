@@ -41,6 +41,8 @@ def test_request_omits_temperature_the_model_rejects():
     assert "temperature" not in without and without["thinking"] == {"type": "disabled"}
     assert with_t["system"] == "P" and with_t["messages"] == [{"role": "user", "content": MD}]
     assert with_t["output_config"]["format"]["type"] == "json_schema"
+    sonnet = extractor.build_request("m", "P", MD, max_tokens=100, temperature=None, thinking="between_tools")
+    assert sonnet["thinking"] == {"type": "between_tools"} and "temperature" not in sonnet
 
 
 @pytest.mark.parametrize(

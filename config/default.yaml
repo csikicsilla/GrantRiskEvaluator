@@ -35,7 +35,7 @@ extract:                   # L1
     prompt: prompts/P5_system_prompt.txt
     model: claude-haiku-4-5-20251001   # the corpus run (DEC-18); the response records the model that answered
     temperature: 0
-    thinking: null                      # null: the model's default; "disabled" switches thinking off
+    thinking: null                      # null: the model's default; "disabled" or "between_tools" switches it off
     max_tokens: 8192
     max_parallel_requests: 4
     max_retries: 5                      # the SDK retries rate limits, overload and timeouts (SPEC-L1-12)
@@ -44,6 +44,10 @@ extract:                   # L1
       input: 1.00
       output: 5.00
     model_settings:                     # per-model overrides, e.g. for the gold comparison (SPEC-L1-14)
+      claude-sonnet-5-5:                # the current Sonnet, for the gold comparison
+        temperature: null               # Sonnet 5.5 rejects non-default sampling parameters
+        thinking: between_tools         # thinking off; Sonnet 5.5 rejects "disabled"
+        prices_per_mtok: {input: 2.00, output: 10.00}   # Anthropic's prices as of 2026-09-25
       claude-sonnet-5:
         temperature: null               # Sonnet 5 rejects sampling parameters
         thinking: disabled
