@@ -257,7 +257,7 @@ SUBMISSION_ANCHORS = pattern(
     r"mikor lehet benyújtani a támogatási kérelmet\?|mikor nyújtható be"
     r"|kérelm\w* benyújtás\w* (?:határideje|időszaka|kezdete)|benyújtási (?:időszak|határidő|szakasz)\w*"
     r"|beadási (?:időszak|határidő)\w*|beadás kezdete|értékelési (?:szakasz|határnap)\w*"
-    r"|kérelm\w* benyújtás(?:ára|a)\b|lehet (?:kölcsön|támogatási )?kérelmet benyújtani"
+    r"|kérelm\w* benyújtás(?:ára|a)\b|lehet (?:kölcsön|hitel|támogatási )?kérelmet benyújtani"
 )
 PAIR_CONNECTOR = re.compile(r"[-–—]|t[óő]l\b|határid", re.IGNORECASE)
 PERIOD_END = re.compile(r"ig\b", re.IGNORECASE)  # "-ig", "napig", "percig": the first date closes a period
@@ -397,7 +397,7 @@ def eloleg(doc: Document) -> Finding:
 # --- idotartam ---------------------------------------------------------------------------
 
 DURATION_ANCHORS = pattern(
-    r"rendelkezésre álló időtartam|fizikai befejezésére"
+    r"rendelkezésre álló időtartam|fizikai befejezésére|fizikai befejezésének (?:határideje|legkésőbbi időpontja|dátuma)"
     r"|projekt\w* (?:megvalósítás\w*|végrehajtás\w*) (?:időtartama|rendelkezésre álló)"
 )
 MONTHS = re.compile(r"(?<![\d.,])(\d{1,3})\s*hónap(?!pal)", re.IGNORECASE)
@@ -416,6 +416,9 @@ CLOSES = re.compile(r"\.?\s*(?:[-–]\s*)?(?:ig|napig)\b", re.IGNORECASE)
 STARTS = re.compile(r"\.?\s*(?:[-–]\s*)?t[óő]l\b", re.IGNORECASE)
 START_BEFORE = pattern(r"(?:korábbi|kezdet\w*)\W+(?:\w+\W+){0,4}$")
 DURATION_NOT_DEFINED = pattern(r"időtartam\w*[^.|]{0,80}?nem értelmezett")
+# A loan programme's last payment: "A Hitelprogram keretében utoljára 2029. szeptember 30-án lehet a
+# Kölcsönszerződés alapján a Végső Kedvezményezetteknek kifizetést teljesíteni."
+LOAN_LAST_PAYMENT = pattern(r"utoljára[^|]{0,160}?kifizetést teljesíteni")
 
 
 def last_submission_date(doc: Document) -> date | None:
@@ -441,9 +444,9 @@ def idotartam(doc: Document) -> Finding:
     """Project duration in months: the largest number of months in the answers to the duration anchors.
 
     A call that gives a completion deadline as a date instead gets the months from its last submission date
-    to that deadline: the shortest time a project can have. The longest duration, `maximalis`, if the call
-    says that the duration is not defined, or if submission stays open until the completion deadline itself
-    (DEC-37). Without a submission date, no value."""
+    to that deadline: the shortest time a project can have. For a loan, the deadline is the last day the loan
+    can be paid out. The longest duration, `maximalis`, if the call says that the duration is not defined, or
+    if submission stays open until the completion deadline itself (DEC-37). Without a submission date, no value."""
     best = None
     deadline = None
     not_defined = None
@@ -464,6 +467,12 @@ def idotartam(doc: Document) -> Finding:
         return found(best[0], best[1])
     if not_defined is not None:
         return found(LONGEST_DURATION, not_defined, "duration_not_defined")
+    loan = ""
+    if fin_form(doc).value == "loan":  # a loan's deadline: the last day it can be paid out (DEC-37)
+        payments = [(d, (m.start(), e)) for m in doc.anchors(LOAN_LAST_PAYMENT)
+                    for d, s, e in dates(doc.view[m.start() : m.end()], m.start())]
+        if payments:
+            deadline, loan = max(payments), " (loan: the last payment)"
     if deadline is None:
         return Finding()
     last = last_submission_date(doc)
@@ -472,7 +481,7 @@ def idotartam(doc: Document) -> Finding:
     if last >= deadline[0]:  # a project may be submitted until its own deadline: the longest duration
         return found(LONGEST_DURATION, deadline[1], f"submission_open_until_deadline: {deadline[0].isoformat()}")
     months = months_between(last, deadline[0])
-    return found(months, deadline[1], f"months_from_dates: {last.isoformat()} → {deadline[0].isoformat()}")
+    return found(months, deadline[1], f"months_from_dates: {last.isoformat()} → {deadline[0].isoformat()}{loan}")
 
 
 # --- tam_tevekenyseg ---------------------------------------------------------------------

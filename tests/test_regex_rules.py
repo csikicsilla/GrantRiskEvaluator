@@ -400,6 +400,32 @@ def test_a_start_date_is_not_a_deadline():
     assert value(rules.idotartam, submission, summary(DURATION_Q, answer)) == "not_found"
 
 
+LOAN_TEXT = (
+    "## Kölcsön típusa\nÉven túli lejáratú Kölcsön.\n\n## Igénybevételi lehetőség\n"
+    "A Hitelprogram keretében 2024. december 05-től 2027. június 30-ig lehet kölcsönkérelmet benyújtani. "
+    "A Hitelprogram keretében utoljára 2029. szeptember 30-án lehet a Kölcsönszerződés alapján a Végső "
+    "Kedvezményezetteknek kifizetést teljesíteni."
+)
+
+
+def test_a_loans_duration_runs_to_its_last_payment():
+    """DEC-37: for a loan, from the last day of loan applications to the last payment (DIMOP Plusz-1.2.3/B-24)."""
+    finding = rules.idotartam(doc(LOAN_TEXT))
+    assert (finding.status, finding.value) == ("found", 27)
+    assert finding.warnings == ["months_from_dates: 2027-06-30 → 2029-09-30 (loan: the last payment)"]
+
+
+def test_the_last_payment_counts_only_for_a_loan():
+    text = LOAN_TEXT.replace("## Kölcsön típusa\nÉven túli lejáratú Kölcsön.", "## A támogatás formája\nVissza nem térítendő.")
+    assert value(rules.idotartam, text) == "not_found"
+
+
+def test_the_completion_deadline_label_anchors_the_longest_stated_duration():
+    text = ("|Projekt fizikai befejezésének határideje|A kölcsönszerződés megkötésétől számított legfeljebb 24 hónap. "
+            "Társasházi igénylők esetén legfeljebb 30 hónap. (Indokolt esetben további 6 hónappal meghosszabbítható.)|")
+    assert value(rules.idotartam, text) == 30
+
+
 def test_stated_months_win_over_a_deadline_date():
     submission = "## Mikor lehet benyújtani a támogatási kérelmet?\n2023.10.20. – 2023.11.10."
     answer = "A projekt fizikai befejezésére 18 hónap áll rendelkezésre, legkésőbb 2027.12.31-ig."
