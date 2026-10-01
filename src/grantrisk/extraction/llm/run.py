@@ -324,14 +324,26 @@ def estimate(client: Any, s: Settings, docs: Sequence[tuple[str, str]]) -> dict[
             "output_tokens_estimate": output, "usd_estimate": usd, "prices_per_mtok": prices}
 
 
+def _usage(record: Mapping[str, Any]) -> dict[str, int]:
+    return {k: v or 0 for k, v in record["response"].get("usage", {}).items() if isinstance(v, int)}
+
+
+def record_cost(record: Mapping[str, Any], prices: Mapping[str, float]) -> float:
+    """The cost of one stored answer; an answer from a batch costs half (DEC-65)."""
+    discount = 0.5 if record.get("service") == "batch" else 1.0
+    return extractor.cost(_usage(record), prices) * discount
+
+
 def paid_by_run(s: Settings, data_root: Path, run_id: str) -> tuple[collections.Counter, float | None]:
     """The token usage and cost of every answer this run asked for, found by the run id in the stored answers."""
     usage: collections.Counter = collections.Counter()
+    cost = 0.0
     for p in (data_root / response_folder(s)).glob("*.json"):
         record = json.loads(p.read_text(encoding="utf-8"))
         if record.get("run_id") == run_id:
-            usage.update({k: v or 0 for k, v in record["response"].get("usage", {}).items() if isinstance(v, int)})
-    return usage, (extractor.cost(usage, s.prices_per_mtok) if s.priced else None)
+            usage.update(_usage(record))
+            cost += record_cost(record, s.prices_per_mtok) if s.priced else 0.0
+    return usage, (cost if s.priced else None)
 
 
 def run(
@@ -425,7 +437,7 @@ def _report(conn, run_id, c2_run_id, s: Settings, data_root: Path, spent_now: fl
     used = _used_responses(conn, run_id, data_root)
     usage = collections.Counter()
     for record in used:
-        usage.update({k: v or 0 for k, v in record["response"].get("usage", {}).items() if isinstance(v, int)})
+        usage.update(_usage(record))
     paid_usage, paid_cost = paid_by_run(s, data_root, run_id)
     n_docs = len({r[0] for r in conn.execute("SELECT DISTINCT doc_id FROM factor_observations WHERE run_id = ?", (run_id,))})
     failed = sorted(r[0] for r in conn.execute(
@@ -446,7 +458,7 @@ def _report(conn, run_id, c2_run_id, s: Settings, data_root: Path, spent_now: fl
         "status_by_factor": {f: dict(sorted(c.items())) for f, c in by_factor.items()},
         "warnings_by_factor": {f: dict(sorted(c.items())) for f, c in warnings.items() if c},
         "usage": dict(usage),  # every answer behind the observations, also those an earlier run paid for
-        "cost_usd": extractor.cost(usage, s.prices_per_mtok) if s.priced else None,
+        "cost_usd": sum(record_cost(r, s.prices_per_mtok) for r in used) if s.priced else None,
         "usage_paid_by_this_run": dict(paid_usage),
         "cost_usd_paid_by_this_run": paid_cost,
         "cost_usd_this_invocation": round(spent_now, 4),

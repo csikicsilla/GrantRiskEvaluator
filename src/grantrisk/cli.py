@@ -61,6 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--confirm", action="store_true", help="llm: confirm a run over the whole corpus")
     extract.add_argument("--resume", help="llm: an unfinished L1 run to continue")
     extract.add_argument("--reparse", action="store_true", help="llm: parse stored responses only, without the API")
+    extract.add_argument("--batch", action="store_true",
+                         help="llm: send the requests through the Message Batches API at half the price (DEC-65)")
     extract.add_argument("--budget-usd", type=float,
                          help="llm: the ceiling of this run in USD (default: extract.llm.budget_usd, SPEC-L1-11)")
 
@@ -215,8 +217,18 @@ def _extract_llm(conn, cfg: config_mod.Config, args: argparse.Namespace, pins: d
         client = anthropic.Anthropic(max_retries=cfg.values["extract"]["llm"].get("max_retries", 5))
     if args.estimate:
         estimate = llm.estimate(client, settings, llm.documents(conn, args.c2_run, doc_ids))
+        if estimate["usd_estimate"] is not None:
+            estimate["usd_estimate_batch"] = estimate["usd_estimate"] / 2  # DEC-65
         print(json.dumps(estimate, indent=2))
         return None  # an estimate is not a run
+    if args.batch:
+        from grantrisk.extraction.llm import batch
+
+        return batch.run_batch(
+            conn, cfg.values, cfg.data_root, client, settings, c2_run_id=args.c2_run, doc_ids=doc_ids,
+            confirmed=args.confirm, resume_run_id=args.resume,
+            progress=lambda line: print(line, file=sys.stderr, flush=True),
+        )
     return llm.run(
         conn, cfg.values, cfg.data_root, client, settings, c2_run_id=args.c2_run, doc_ids=doc_ids,
         confirmed=args.confirm, resume_run_id=args.resume, progress=lambda line: print(line, file=sys.stderr, flush=True),
