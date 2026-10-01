@@ -326,3 +326,72 @@ def test_grouped_scheme_is_kept_apart():
     assert [r["scheme"] for r in result.comparison["grouped"]] == ["grouped"]
     assert not any(r["is_best"] for r in result.comparison["grouped"])
     assert result.comparison["grouped"][0]["not_above_baseline"] is None  # no baseline in the grouped scheme
+
+
+# --- The test of INT-RQ-B: embeddings against TF-IDF (DEC-63) ---------------------------------
+
+
+def test_corrected_t_test_interval():
+    """DEC-63: the 95% interval comes from the same corrected variance as the test."""
+    from scipy import stats
+
+    diffs = [0.02, 0.05, -0.01, 0.03, 0.04, 0.0, 0.02, 0.01, 0.03, 0.02]
+    t = metrics.corrected_t_test(diffs, 0.25)
+    se = math.sqrt((1 / len(diffs) + 0.25) * np.var(diffs, ddof=1))
+    half = stats.t.ppf(0.975, len(diffs) - 1) * se
+    assert (t["ci_low"], t["ci_high"]) == pytest.approx((np.mean(diffs) - half, np.mean(diffs) + half))
+    assert (t["ci_low"] > 0) == (t["p_value"] < 0.05)  # the interval and the test agree
+    same = metrics.corrected_t_test([0.01] * 25, 0.25)
+    assert same["ci_low"] == same["ci_high"] == pytest.approx(0.01)
+
+
+@pytest.mark.parametrize("mean, low, high, p_holm, expected", [
+    (0.05, 0.03, 0.07, 0.01, ("embedding_outperforms", None)),
+    (0.01, 0.005, 0.015, 0.01, ("embedding_outperforms", "practically negligible")),
+    (-0.05, -0.07, -0.03, 0.01, ("tfidf_outperforms", None)),
+    (-0.01, -0.02, -0.001, 0.04, ("tfidf_outperforms", "practically negligible")),
+    (0.0, -0.015, 0.02, 0.9, ("practically_equivalent", None)),
+    (0.01, -0.03, 0.05, 0.6, ("inconclusive", None)),
+    (0.04, 0.001, 0.08, 0.2, ("inconclusive", "the unadjusted 95% interval excludes 0, but the difference is not "
+                                              "significant after Holm")),
+])
+def test_outcome_of_one_comparison(mean, low, high, p_holm, expected):
+    """DEC-63: the four outcomes and the note on a significant but small difference."""
+    assert evaluate.outcome(mean, low, high, p_holm) == expected
+
+
+def test_embeddings_against_tfidf():
+    """DEC-63: representation minus TF-IDF with the same classifier; Holm over the family only."""
+    same = noisy(0.7, 5)
+    result = compute({("tfidf", "logreg"): noisy(0.5, 1), ("tfidf", "svm"): noisy(0.9, 2),
+                      ("tfidf", "rf"): same, ("tfidf", "majority"): majority(),
+                      ("e5", "logreg"): noisy(0.95, 3), ("e5", "svm"): noisy(0.4, 4), ("e5", "rf"): noisy(0.7, 5),
+                      ("e5", "majority"): majority(), ("bge_m3_512", "logreg"): noisy(0.6, 6)})
+    c = result.tfidf_comparison
+    rows = {(r["representation"], r["classifier"]): r for r in c["rows"]}
+    assert list(rows) == [("e5", "logreg"), ("e5", "svm"), ("e5", "rf"), ("bge_m3_512", "logreg")]
+    assert c["family_size"] == 3
+    e5 = result.evaluations
+    f1 = {e.key[1:]: e.summary("f1_macro:fold_mean") for e in e5}
+    assert rows[("e5", "logreg")]["mean_diff"] == pytest.approx(f1[("e5", "logreg")] - f1[("tfidf", "logreg")])
+    assert rows[("e5", "logreg")]["outcome"] == "embedding_outperforms"
+    assert rows[("e5", "svm")]["outcome"] == "tfidf_outperforms"
+    assert rows[("e5", "rf")]["mean_diff"] == 0 and rows[("e5", "rf")]["outcome"] == "practically_equivalent"
+    assert all(r["p_value"] <= r["p_holm"] for r in c["rows"] if r["in_family"])
+    exploratory = rows[("bge_m3_512", "logreg")]
+    assert not exploratory["in_family"] and exploratory["p_holm"] is None and exploratory["outcome"] is None
+    assert c["h1_supported"] is True
+    assert c["outcome_counts"] == {"embedding_outperforms": 1, "tfidf_outperforms": 1, "practically_equivalent": 1,
+                                   "inconclusive": 0}
+    assert "hubert/logreg" in c["absent_from_family"] and "e5/logreg" not in c["absent_from_family"]
+    assert compute({("tfidf", "logreg"): noisy(0.9, 1)}, with_significance=False).tfidf_comparison is None
+
+
+def test_holm_runs_over_the_family_of_comparisons():
+    models = {("tfidf", c): noisy(0.7, i) for i, c in enumerate(("logreg", "svm", "rf"))}
+    models.update({(rep, c): noisy(0.72, 10 * j + i) for j, rep in enumerate(("hubert", "e5", "bge_m3", "qwen3_8b"))
+                   for i, c in enumerate(("logreg", "svm", "rf"))})
+    c = compute(models).tfidf_comparison
+    assert c["family_size"] == 12 and c["absent_from_family"] == []
+    family = c["rows"]
+    assert [r["p_holm"] for r in family] == pytest.approx(metrics.holm([r["p_value"] for r in family]))

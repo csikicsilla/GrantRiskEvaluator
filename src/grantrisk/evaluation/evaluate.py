@@ -2,14 +2,16 @@
 
 Measures how well each model run of an M2 run reproduces the tercile label: the metrics
 of SPEC-E2-01 per fold, per repeat and pooled, their spread, the error sizes, the ROC
-curves, the comparison with the majority baseline and the best model run. ``compute`` is
-the pure computation; ``run`` reads the M2 run and its L3 and C1 inputs from the database
-and writes the metric rows and the report in one transaction.
+curves, the comparison with the majority baseline and the best model run, and the test of
+INT-RQ-B: each transformer representation against TF-IDF (DEC-63). ``compute`` is the pure
+computation; ``run`` reads the M2 run and its L3 and C1 inputs from the database and writes
+the metric rows and the report in one transaction.
 """
 
 from __future__ import annotations
 
 import collections
+import json
 import sqlite3
 import statistics
 from collections.abc import Mapping, Sequence
@@ -28,6 +30,21 @@ BASELINE = "majority"
 ALL = "all"
 
 ModelKey = tuple[str, str, str]  # (scheme, representation, classifier)
+
+# DEC-63, fixed before the corpus results: the family of confirmatory comparisons, the level and the margin.
+TFIDF = "tfidf"
+FAMILY_REPRESENTATIONS = ("hubert", "e5", "bge_m3", "qwen3_8b")
+FAMILY_CLASSIFIERS = ("logreg", "svm", "rf")
+ALPHA = 0.05  # family-wise, with Holm's method
+MARGIN = 0.02  # macro-F1: "practically equivalent" when the 95% interval lies within ±MARGIN
+OUTCOMES = {
+    "embedding_outperforms": "embeddings outperform TF-IDF",
+    "tfidf_outperforms": "TF-IDF outperforms",
+    "practically_equivalent": "practically equivalent",
+    "inconclusive": "inconclusive",
+}
+NEGLIGIBLE = "practically negligible"
+EXPLORATORY = "exploratory: outside the family of DEC-63"
 
 
 class E2InputError(ValueError):
@@ -68,6 +85,7 @@ class E2Result:
     grid: dict[str, list[dict[str, Any]]]
     significance: dict[str, list[dict[str, Any]]]
     label_distributions: dict[str, dict[tuple[str, str], int]]  # subset → (tercile, fixed) → n
+    tfidf_comparison: dict[str, Any] | None = None  # DEC-63; None when the tests are switched off
 
 
 # --- One model run (SPEC-E2-01 … -04, -08) -----------------------------------------------------
@@ -252,6 +270,71 @@ def significance(evaluations: Sequence[ModelEvaluation], rows: Sequence[Mapping[
     return out
 
 
+def outcome(mean_diff: float, ci_low: float, ci_high: float, p_holm: float) -> tuple[str, str | None]:
+    """DEC-63: the outcome of one comparison (representation minus TF-IDF), and its note.
+
+    Significant (Holm-adjusted p < ALPHA): the better one outperforms, "practically negligible" if
+    the 95% interval lies within ±MARGIN. Not significant: practically equivalent if the interval lies
+    within ±MARGIN, otherwise inconclusive.
+    """
+    within = -MARGIN <= ci_low and ci_high <= MARGIN
+    if p_holm < ALPHA:
+        return ("embedding_outperforms" if mean_diff > 0 else "tfidf_outperforms"), (NEGLIGIBLE if within else None)
+    if within:
+        return "practically_equivalent", None
+    if ci_low > 0 or ci_high < 0:  # possible: the interval is not adjusted for the 12 comparisons
+        return "inconclusive", "the unadjusted 95% interval excludes 0, but the difference is not significant after Holm"
+    return "inconclusive", None
+
+
+def tfidf_comparison(evaluations: Sequence[ModelEvaluation]) -> dict[str, Any]:
+    """DEC-63: each transformer representation against TF-IDF with the same classifier (INT-RQ-B).
+
+    The stratified scheme only. The difference is representation minus TF-IDF, per fold. Holm's
+    adjustment runs over the family of the representations and classifiers present; a representation
+    outside the family is reported beside it as exploratory. H1 is supported if at least one
+    comparison of the family has the outcome "embeddings outperform TF-IDF".
+    """
+    by_key = {e.key: e for e in evaluations}
+    rows = []
+    for (scheme, rep, clf), e in by_key.items():
+        reference = by_key.get((scheme, TFIDF, clf))
+        if scheme != STRATIFIED or rep == TFIDF or clf == BASELINE or reference is None:
+            continue
+        folds, ref_folds = e.fold_f1, reference.fold_f1
+        if set(folds) != set(ref_folds) or None in folds.values() or None in ref_folds.values():
+            continue  # cannot happen with one shared fold assignment and stratified folds
+        diffs = [folds[f] - ref_folds[f] for f in sorted(ref_folds)]
+        test = m.corrected_t_test(diffs, reference.test_train_ratio)
+        rows.append({"scheme": scheme, "representation": rep, "classifier": clf, "n_folds": len(diffs), **test,
+                     "in_family": rep in FAMILY_REPRESENTATIONS and clf in FAMILY_CLASSIFIERS})
+
+    def order(r):
+        rep, clf = r["representation"], r["classifier"]
+        return (not r["in_family"], FAMILY_REPRESENTATIONS.index(rep) if rep in FAMILY_REPRESENTATIONS else 0, rep,
+                FAMILY_CLASSIFIERS.index(clf) if clf in FAMILY_CLASSIFIERS else 0, clf)
+
+    rows.sort(key=order)
+    family = [r for r in rows if r["in_family"]]
+    for r, p in zip(family, m.holm([r["p_value"] for r in family])):
+        r["p_holm"] = p
+        r["outcome"], r["note"] = outcome(r["mean_diff"], r["ci_low"], r["ci_high"], p)
+    for r in rows:
+        if not r["in_family"]:
+            r["p_holm"], r["outcome"], r["note"] = None, None, EXPLORATORY
+    present = {(r["representation"], r["classifier"]) for r in family}
+    return {
+        "rows": rows,
+        "family_size": len(family),
+        "absent_from_family": [f"{rep}/{clf}" for rep in FAMILY_REPRESENTATIONS for clf in FAMILY_CLASSIFIERS
+                               if (rep, clf) not in present],
+        "outcome_counts": {k: sum(r["outcome"] == k for r in family) for k in OUTCOMES},
+        "h1_supported": any(r["outcome"] == "embedding_outperforms" for r in family) if family else None,
+        "alpha": ALPHA,
+        "margin": MARGIN,
+    }
+
+
 def label_distributions(labels: Sequence[tuple[str, str, str]]) -> dict[str, dict[tuple[str, str], int]]:
     """SPEC-E2-07: the cross-table of (tercile, fixed) labels, overall and per period.
 
@@ -279,6 +362,7 @@ def compute(
         grid={s: grid(rows) for s, rows in table.items()},
         significance={s: significance(evaluations, rows) for s, rows in table.items()} if with_significance else {},
         label_distributions=label_distributions(labels),
+        tfidf_comparison=tfidf_comparison(evaluations) if with_significance else None,
     )
 
 
@@ -316,7 +400,44 @@ def markdown_report(result: E2Result, meta: Mapping[str, Any]) -> str:
     if meta["failed_in_m2"]:
         lines += ["", "Model runs that failed in M2 and are not evaluated: "
                   + ", ".join(f"`{'/'.join(k)}`" for k in meta["failed_in_m2"]) + "."]
+    lines += tfidf_comparison_markdown(result.tfidf_comparison, meta.get("m2_tuning"))
     return "\n".join(lines) + "\n"
+
+
+def _signed(x: float) -> str:
+    return f"{x:+.3f}"
+
+
+def tfidf_comparison_markdown(c: Mapping[str, Any] | None, tuning: Mapping[str, Any] | None) -> list[str]:
+    """The section of the E2 report on the test of INT-RQ-B (DEC-63)."""
+    if c is None:
+        return []
+    analysis = (f"`C` of {', '.join(tuning['classifiers'])} tuned inside each training fold over {tuning['C']} "
+                "(DEC-63 (b), DEC-67): the confirmatory analysis" if tuning else
+                "the fixed defaults of SPEC-M2-04 (DEC-63 (a)), reported beside the confirmatory analysis")
+    lines = ["", "## Embeddings against TF-IDF (DEC-63)", "",
+             f"Hyperparameters: {analysis}. Difference: mean macro-F1 of the representation minus that of TF-IDF with "
+             "the same classifier, over the paired folds; 95% interval and p from the corrected resampled t-test "
+             f"(Nadeau and Bengio, 2003), two-sided; p (Holm) over the {c['family_size']} comparisons of the family. "
+             f"Margin of practical equivalence: ±{c['margin']}.", ""]
+    if not c["rows"]:
+        return lines + ["No comparison: the M2 run has no TF-IDF model run beside a transformer representation."]
+    lines += ["| Representation | Classifier | Difference [95% interval] | p | p (Holm) | Outcome |",
+              "|---|---|---|---|---|---|"]
+    for r in c["rows"]:
+        result = OUTCOMES[r["outcome"]] if r["outcome"] else ""
+        if r["note"]:
+            result = f"{result} ({r['note']})" if result else r["note"]
+        holm = "–" if r["p_holm"] is None else f"{r['p_holm']:.4f}"
+        lines.append(f"| {r['representation']} | {r['classifier']} | {_signed(r['mean_diff'])} "
+                     f"[{_signed(r['ci_low'])}, {_signed(r['ci_high'])}] | {r['p_value']:.4f} | {holm} | {result} |")
+    verdict = ("supported: at least one comparison has the outcome \"embeddings outperform TF-IDF\"" if c["h1_supported"]
+               else "not supported: no comparison has the outcome \"embeddings outperform TF-IDF\"")
+    lines += ["", f"H1 (INT-RQ-B) is {verdict}. Outcomes: "
+              + ", ".join(f"{OUTCOMES[k]} {n}" for k, n in c["outcome_counts"].items()) + "."]
+    if c["absent_from_family"]:
+        lines.append("Not computed, so outside the family: " + ", ".join(f"`{k}`" for k in c["absent_from_family"]) + ".")
+    return lines
 
 
 def json_report(result: E2Result, meta: Mapping[str, Any]) -> dict[str, Any]:
@@ -340,6 +461,12 @@ def json_report(result: E2Result, meta: Mapping[str, Any]) -> dict[str, Any]:
             "significance": "corrected resampled t-test (Nadeau and Bengio, 2003) on the paired fold differences of "
                             "macro-F1, the first best model run minus the other; two-sided; p_holm: adjusted for the "
                             "comparisons of the scheme with Holm's step-down method (DEC-52)",
+            "tfidf_comparison": "DEC-63: each transformer representation minus TF-IDF with the same classifier, "
+                                "stratified scheme; corrected resampled t-test and its 95% interval; p_holm over the "
+                                f"family {list(FAMILY_REPRESENTATIONS)} × {list(FAMILY_CLASSIFIERS)}; outcome: "
+                                "embedding_outperforms / tfidf_outperforms (p_holm < 0.05; note 'practically "
+                                "negligible' if the interval lies within ±0.02), otherwise practically_equivalent "
+                                "(interval within ±0.02) or inconclusive",
             "roc_curves": f"pooled over the repeats; TPR at {m.ROC_GRID} FPR points, linear between the ROC vertices",
         },
         "comparison": result.comparison,
@@ -349,6 +476,7 @@ def json_report(result: E2Result, meta: Mapping[str, Any]) -> dict[str, Any]:
         "not_above_baseline": {s: ["/".join((r["representation"], r["classifier"])) for r in rows
                                    if r["not_above_baseline"]] for s, rows in result.comparison.items()},
         "significance": result.significance or "not run",
+        "tfidf_comparison": result.tfidf_comparison or "not run",
         "label_distributions": {
             s: {f"{t}/{f}": n for (t, f), n in cells.items()} for s, cells in result.label_distributions.items()
         },
@@ -442,6 +570,15 @@ def _insert(conn: sqlite3.Connection, run_id: str, result: E2Result) -> None:
          for rows in result.significance.values() for t in rows],
     )
     conn.executemany(
+        "INSERT INTO tfidf_comparisons (run_id, scheme, representation, classifier, n_folds, mean_diff, sd_diff,"
+        " ci_low, ci_high, t_stat, df, p_value, in_family, p_holm, outcome, note)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [(run_id, t["scheme"], t["representation"], t["classifier"], t["n_folds"], t["mean_diff"], t["sd_diff"],
+          t["ci_low"], t["ci_high"], t["t"], t["df"], t["p_value"], int(t["in_family"]), t["p_holm"], t["outcome"],
+          t["note"])
+         for t in (result.tfidf_comparison or {}).get("rows", [])],
+    )
+    conn.executemany(
         "INSERT INTO label_distributions VALUES (?, ?, ?, ?, ?)",
         [(run_id, s, t, f, n) for s, cells in result.label_distributions.items() for (t, f), n in cells.items()],
     )
@@ -466,7 +603,11 @@ def run(
     c1_run_id = input_of(conn, l3_run_id, "C1")
     runs.require_complete(conn, c1_run_id, "C1")
     settings = config_values.get("evaluate") or {}
-    snapshot = {**config_values, "e2_run": {"metrics_version": m.METRICS_VERSION}}
+    m2_tuning = (json.loads(runs.get(conn, m2_run_id)["config_json"]).get("m2_run") or {}).get("tuning")
+    snapshot = {**config_values, "e2_run": {
+        "metrics_version": m.METRICS_VERSION,
+        "tfidf_comparison": {"family": [list(FAMILY_REPRESENTATIONS), list(FAMILY_CLASSIFIERS)], "alpha": ALPHA,
+                             "margin": MARGIN, "m2_tuning": m2_tuning}}}
     run_id = runs.start(conn, "E2", snapshot, inputs=sorted({m2_run_id, l3_run_id, c1_run_id}))
     written: list[str] = []
     try:
@@ -499,6 +640,7 @@ def run(
             "n_folds": n_folds,
             "model_runs": ["/".join(e.key) for e in result.evaluations],
             "failed_in_m2": failed,
+            "m2_tuning": m2_tuning,
         }
         folder = f"reports/{run_id}"
         written.append(files.write_text(data_root, f"{folder}/e2_report.md", markdown_report(result, meta)))

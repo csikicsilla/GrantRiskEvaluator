@@ -182,3 +182,18 @@ def test_on_a_real_m2_run(conn, data_root):
     assert acc == pytest.approx(n / len(labels))
     assert set(LABELS) == {r[0] for r in conn.execute(
         "SELECT DISTINCT curve FROM roc_curves WHERE run_id = ? AND curve != 'macro'", (run_id,))}
+
+
+def test_embeddings_against_tfidf_are_stored_and_reported(conn, data_root, chain):
+    """DEC-63: one row per transformer model run; the report states the hyperparameters and the verdict."""
+    run_id = evaluate.run(conn, {}, data_root, m2_run_id=chain["m2"])
+    stored = conn.execute("SELECT * FROM tfidf_comparisons WHERE run_id = ? ORDER BY representation, classifier",
+                          (run_id,)).fetchall()
+    assert [(r["representation"], r["classifier"]) for r in stored] == [("hubert", "logreg"), ("hubert", "svm")]
+    assert all(r["in_family"] == 1 and r["outcome"] and r["ci_low"] <= r["mean_diff"] <= r["ci_high"] for r in stored)
+    report = (data_root / f"reports/{run_id}/e2_report.md").read_text(encoding="utf-8")
+    assert "## Embeddings against TF-IDF (DEC-63)" in report
+    assert "the fixed defaults of SPEC-M2-04 (DEC-63 (a))" in report  # the seeded M2 run records no tuning
+    assert "H1 (INT-RQ-B) is" in report
+    snapshot = json.loads(runs.get(conn, run_id)["config_json"])["e2_run"]["tfidf_comparison"]
+    assert snapshot["margin"] == 0.02 and snapshot["m2_tuning"] is None

@@ -1,0 +1,25 @@
+-- DEC-63: the test of INT-RQ-B. Each transformer representation against TF-IDF with the same classifier,
+-- on the paired fold differences of macro-F1 (representation minus TF-IDF): the corrected resampled t-test,
+-- the 95% interval from the same corrected variance, Holm's adjustment over the family of comparisons,
+-- and the outcome. A representation outside the family (e.g. bge_m3_512) is exploratory: no p_holm, no outcome.
+CREATE TABLE tfidf_comparisons (
+    run_id          TEXT NOT NULL REFERENCES runs (run_id),
+    scheme          TEXT NOT NULL,
+    representation  TEXT NOT NULL,
+    classifier      TEXT NOT NULL,
+    n_folds         INTEGER NOT NULL,
+    mean_diff       REAL NOT NULL,
+    sd_diff         REAL NOT NULL,
+    ci_low          REAL NOT NULL,
+    ci_high         REAL NOT NULL,
+    t_stat          REAL NOT NULL,
+    df              INTEGER NOT NULL,
+    p_value         REAL NOT NULL,
+    in_family       INTEGER NOT NULL CHECK (in_family IN (0, 1)),
+    p_holm          REAL,
+    outcome         TEXT CHECK (outcome IN ('embedding_outperforms', 'tfidf_outperforms',
+                                            'practically_equivalent', 'inconclusive')),
+    note            TEXT,
+    PRIMARY KEY (run_id, scheme, representation, classifier),
+    CHECK ((in_family = 1) = (p_holm IS NOT NULL AND outcome IS NOT NULL))
+);

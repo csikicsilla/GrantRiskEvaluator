@@ -242,6 +242,45 @@ def significance_tables(data: Data, today: str) -> tuple[str | None, str]:
     return csv, md_document("Significance", body, data, stages, today)
 
 
+def tfidf_comparison_tables(data: Data, today: str) -> tuple[str | None, str]:
+    """DEC-63: the test of INT-RQ-B, each transformer representation against TF-IDF with the same classifier."""
+    from grantrisk.evaluation.evaluate import MARGIN, OUTCOMES
+
+    stages = ["E2", "M2"]
+    if not data.chain.e2 or not data.tfidf_comparisons:
+        return None, md_document("Embeddings against TF-IDF", ["Not run."], data, stages, today)
+    rows = data.tfidf_comparisons
+    family = [r for r in rows if r["in_family"]]
+    tuning = (data.e2_report or {}).get("m2_tuning")
+    analysis = ("`C` of logreg and svm tuned inside each training fold (DEC-63 (b), DEC-67): the confirmatory analysis"
+                if tuning else "the fixed defaults of SPEC-M2-04 (DEC-63 (a)), reported beside the confirmatory analysis")
+    supported = any(r["outcome"] == "embedding_outperforms" for r in family)
+
+    def result(r) -> str:
+        text = OUTCOMES[r["outcome"]] if r["outcome"] else ""
+        return f"{text} ({r['note']})" if text and r["note"] else text or (r["note"] or "")
+
+    body = [f"Hyperparameters: {analysis}. Difference: mean macro-F1 of the representation minus that of TF-IDF with "
+            "the same classifier over the 25 paired folds; 95% interval and p from the corrected resampled t-test "
+            f"(Nadeau and Bengio, 2003), two-sided; p (Holm) over the {len(family)} comparisons of the family. "
+            f"Practically equivalent: not significant and the interval within ±{MARGIN}. Fixed before the results "
+            "(DEC-63).", "",
+            *md_table(["Representation", "Classifier", "Difference [95% interval]", "p", "p (Holm)", "Outcome"],
+                      [[r["representation"], r["classifier"],
+                        f"{r['mean_diff']:+.3f} [{r['ci_low']:+.3f}, {r['ci_high']:+.3f}]", fmt(r["p_value"], 4),
+                        fmt(r["p_holm"], 4), result(r)] for r in rows]),
+            "", f"H1 (INT-RQ-B) is {'supported' if supported else 'not supported'}: "
+            f"{'at least one' if supported else 'no'} comparison of the family has the outcome "
+            "\"embeddings outperform TF-IDF\"."]
+    csv = csv_text(["scheme", "representation", "classifier", "n_folds", "mean_diff", "sd_diff", "ci_low", "ci_high",
+                    "t_stat", "df", "p_value", "in_family", "p_holm", "outcome", "note"],
+                   [[r["scheme"], r["representation"], r["classifier"], r["n_folds"], rounded(r["mean_diff"]),
+                     rounded(r["sd_diff"]), rounded(r["ci_low"]), rounded(r["ci_high"]), rounded(r["t_stat"]), r["df"],
+                     rounded(r["p_value"], 6), r["in_family"], rounded(r["p_holm"], 6), r["outcome"] or "",
+                     r["note"] or ""] for r in rows])
+    return csv, md_document("Embeddings against TF-IDF", body, data, stages, today)
+
+
 def gold_validation(data: Data, today: str) -> tuple[str | None, str]:
     """E1 via SPEC-E3-03 (INT-OUT-05): the agreement with the gold points per factor and source."""
     stages = ["E1", "L1"]
@@ -306,6 +345,7 @@ THESIS_TABLES = {
     "error_sizes": error_size_tables,
     "period_breakdown": period_tables,
     "significance": significance_tables,
+    "tfidf_comparison": tfidf_comparison_tables,
     "gold_validation": gold_validation,
     "gold_label_agreement": gold_label_agreement,
 }

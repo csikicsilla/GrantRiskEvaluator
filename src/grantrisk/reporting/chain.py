@@ -165,6 +165,7 @@ class Data:
     comparison: list[sqlite3.Row] = field(default_factory=list)
     grid: list[sqlite3.Row] = field(default_factory=list)
     significance: list[sqlite3.Row] = field(default_factory=list)
+    tfidf_comparisons: list[sqlite3.Row] = field(default_factory=list)  # DEC-63
     label_distributions: list[sqlite3.Row] = field(default_factory=list)
     models: dict[tuple[str, str, str], ModelData] = field(default_factory=dict)
     e2_report: dict[str, Any] | None = None
@@ -253,6 +254,8 @@ def load(conn: sqlite3.Connection, data_root: Path, chain: Chain) -> Data:
         data.significance = conn.execute(
             "SELECT * FROM significance WHERE run_id = ? ORDER BY scheme, p_value, representation, classifier",
             (c.e2,)).fetchall()
+        data.tfidf_comparisons = conn.execute(
+            "SELECT * FROM tfidf_comparisons WHERE run_id = ? ORDER BY in_family DESC, rowid", (c.e2,)).fetchall()
         data.label_distributions = conn.execute(
             "SELECT * FROM label_distributions WHERE run_id = ? ORDER BY subset, tercile_label, fixed_label",
             (c.e2,)).fetchall()

@@ -237,12 +237,13 @@ def mean_sd(values: Sequence[float | None]) -> tuple[float | None, float | None,
     return mean, statistics.stdev(defined) if len(defined) > 1 else None, len(defined)
 
 
-def corrected_t_test(differences: Sequence[float], test_train_ratio: float) -> dict[str, float | int]:
+def corrected_t_test(differences: Sequence[float], test_train_ratio: float, level: float = 0.95) -> dict[str, float | int]:
     """SPEC-E2-09: the corrected resampled t-test (Nadeau and Bengio, 2003).
 
     ``differences`` are the paired per-fold differences of a metric over the r × k folds;
     ``test_train_ratio`` is n_test / n_train. The variance of the mean is corrected from
-    1/J to 1/J + n_test/n_train, because the training sets overlap. Two-sided p-value.
+    1/J to 1/J + n_test/n_train, because the training sets overlap. Two-sided p-value, and
+    the ``level`` interval of the mean difference from the same corrected variance (DEC-63).
     """
     from scipy import stats
 
@@ -252,9 +253,12 @@ def corrected_t_test(differences: Sequence[float], test_train_ratio: float) -> d
     df = j - 1
     if var == 0:
         return {"mean_diff": mean, "sd_diff": 0.0, "t": 0.0 if mean == 0 else math.copysign(math.inf, mean),
-                "df": df, "p_value": 1.0 if mean == 0 else 0.0}
-    t = mean / math.sqrt((1 / j + test_train_ratio) * var)
-    return {"mean_diff": mean, "sd_diff": math.sqrt(var), "t": t, "df": df, "p_value": float(2 * stats.t.sf(abs(t), df))}
+                "df": df, "p_value": 1.0 if mean == 0 else 0.0, "ci_low": mean, "ci_high": mean}
+    se = math.sqrt((1 / j + test_train_ratio) * var)
+    t = mean / se
+    half = float(stats.t.ppf(0.5 + level / 2, df)) * se
+    return {"mean_diff": mean, "sd_diff": math.sqrt(var), "t": t, "df": df, "p_value": float(2 * stats.t.sf(abs(t), df)),
+            "ci_low": mean - half, "ci_high": mean + half}
 
 
 def holm(p_values: Sequence[float]) -> list[float]:

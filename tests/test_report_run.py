@@ -108,7 +108,7 @@ def test_run_and_files(built):
     for name in ("dashboard.html", "risk_dataset.csv", "tables/model_comparison.csv", "tables/model_comparison.md",
                  "tables/model_grid.md", "tables/label_distributions.md", "tables/error_sizes.md",
                  "tables/gold_validation.md", "tables/gold_label_agreement.md", "tables/period_breakdown.md",
-                 "tables/significance.md", "error_analysis/error_analysis.md", "error_analysis/misclassified.csv",
+                 "tables/significance.md", "tables/tfidf_comparison.md", "error_analysis/error_analysis.md", "error_analysis/misclassified.csv",
                  "error_analysis/error_rates_by_group.csv", "appendix/8_1_scoring_table.md",
                  "appendix/8_2_er_diagram.mmd", "appendix/8_3_reproduction.md", "appendix/8_4_generative_ai.md",
                  "appendix/data_flow.mmd", "PROVENANCE.md"):
