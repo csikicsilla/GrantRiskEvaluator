@@ -19,7 +19,7 @@ from typing import Any
 
 from grantrisk.store.db import transaction
 
-STAGES = ("C1", "C2", "L1", "L2", "L3", "M1", "M2", "E1", "E2", "E3")
+STAGES = ("C1", "C2", "L1", "L2", "L3", "M1", "M2", "E1", "E2", "E3", "E4")
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 

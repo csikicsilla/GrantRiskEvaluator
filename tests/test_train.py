@@ -221,3 +221,29 @@ def test_tuned_folds_in_parallel_give_the_same_result():
     a = train.fit_predict(X_DENSE, Y, splits, **kwargs)
     b = train.fit_predict(X_DENSE, Y, splits, n_jobs=2, **kwargs)
     assert np.allclose(a.probabilities, b.probabilities) and a.tuning == b.tuning
+
+
+@pytest.mark.parametrize("sparse", [False, True])
+@pytest.mark.parametrize("C", [0.1, 1.0, 10.0])
+def test_rbf_svm_from_dot_products_is_scikit_learns_rbf_svm(sparse, C):
+    """DEC-69: the kernel from dot products gives the model of SVC(kernel="rbf"), gamma="scale" included.
+
+    Equal within the solver's tolerance: libsvm stops at tol = 1e-3, and the kernel values are summed
+    in another order, so the decision values may differ in the fifth decimal.
+    """
+    import scipy.sparse as sp
+    from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.svm import SVC
+
+    from grantrisk.modelling.tfidf import vectorizer
+
+    y = np.asarray(Y)
+    X = vectorizer({"min_df": 1}).fit_transform(X_TEXT) if sparse else X_DENSE
+    assert sp.issparse(X) == sparse
+    ours = classifiers.RBFSVC(C=C, class_weight="balanced", random_state=1).fit(X, y)
+    theirs = SVC(C=C, kernel="rbf", gamma="scale", class_weight="balanced", random_state=1).fit(X, y)
+    assert np.allclose(ours.decision_function(X), theirs.decision_function(X), atol=1e-4)
+    assert (ours.predict(X) == theirs.predict(X)).all()
+    a = CalibratedClassifierCV(classifiers.RBFSVC(C=C, class_weight="balanced"), cv=3, ensemble=False).fit(X, y)
+    b = CalibratedClassifierCV(SVC(C=C, class_weight="balanced"), cv=3, ensemble=False).fit(X, y)
+    assert np.allclose(a.predict_proba(X), b.predict_proba(X), atol=1e-4)

@@ -187,6 +187,14 @@ train:                     # M2
 evaluate:                  # E2
   significance: true       # SPEC-E2-09: the best model run against each other one (corrected resampled t-test)
 
+explain:                   # E4 (DEC-64, DEC-69); exploratory analyses of the representations
+  analyses: [factor_probe, combination, error_overlap, context_length]   # learning_curve when time allows (DEC-64 no. 3)
+  probe_cv: {n_splits: 5, n_repeats: 5, random_state: 42}   # the factor probes: stratified by the factor's points
+  probe_origins: [band, manual]   # imputed (mean) and rule-set points are not probed
+  ridge_alpha: 1.0         # the probe of the normalised score
+  combination_classifiers: [logreg, svm]
+  learning_curve_shares: [0.2, 0.4, 0.6, 0.8, 1.0]
+
 report:                    # E3; the chain of runs the report is built from (Spec_E3_Report.md §2.1)
   chain:                   # the E3 command's arguments override these
     e2_run: null           # the E2 run; its M2, L3 and C1 runs and theirs follow from the lineage

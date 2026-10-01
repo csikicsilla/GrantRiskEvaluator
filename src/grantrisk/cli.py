@@ -20,6 +20,7 @@ STAGES = [
     ("validate", "E1", "compare the extractors with the gold set (Spec_E1_ValidateExtraction.md)"),
     ("evaluate", "E2", "compute the model metrics (Spec_E2_EvaluateModels.md)"),
     ("report", "E3", "build the dashboard and the exports (Spec_E3_Report.md)"),
+    ("explain", "E4", "explanatory analyses of the representations (DEC-64, DEC-69)"),
 ]
 
 
@@ -107,6 +108,11 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--e2-run", help="the E2 run of the chain (default: report.chain.e2_run)")
     report.add_argument("--e1-run", help="the E1 run of the chain (default: report.chain.e1_run)")
     report.add_argument("--l3-run", help="alone: a report without models (default: report.chain.l3_run)")
+
+    explain = stage_parsers["explain"]
+    explain.add_argument("--e2-run", required=True, help="the E2 run whose chain (M2, M1, L3) is analysed")
+    explain.add_argument("--analyses", help="comma-separated (default: explain.analyses); "
+                                            "factor_probe, combination, learning_curve, error_overlap, context_length")
     return parser
 
 
@@ -281,6 +287,13 @@ def _evaluate(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
     from grantrisk.evaluation import evaluate
 
     return evaluate.run(conn, cfg.values, cfg.data_root, m2_run_id=args.m2_run)
+
+
+def _explain(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
+    from grantrisk.evaluation import explain
+
+    return explain.run(conn, cfg.values, cfg.data_root, e2_run_id=args.e2_run, analyses=_names(args.analyses),
+                       progress=lambda line: print(line, file=sys.stderr, flush=True))
 
 
 def _report(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
@@ -479,6 +492,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_stage("evaluate", _evaluate)(cfg, args)
     if args.command == "report":
         return _run_stage("report", _report)(cfg, args)
+    if args.command == "explain":
+        return _run_stage("explain", _explain)(cfg, args)
     assert args.command == "run-all", args.command  # argparse accepts no other command
     return _run_all(cfg, args)
 

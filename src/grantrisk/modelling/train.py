@@ -141,7 +141,7 @@ def fit_fold(X: Any, y: np.ndarray, split: Split, *, text: bool, classifier: str
     return pipe
 
 
-def _probabilities(model: Any, X: Any) -> np.ndarray:
+def probabilities(model: Any, X: Any) -> np.ndarray:
     """predict_proba in the order of LABELS."""
     raw = model.predict_proba(X)
     classes = list(model.classes_)
@@ -152,7 +152,7 @@ def _probabilities(model: Any, X: Any) -> np.ndarray:
     return probs
 
 
-def _macro_f1(y_true: Sequence[str], probs: np.ndarray) -> float:
+def macro_f1(y_true: Sequence[str], probs: np.ndarray) -> float:
     from sklearn.metrics import f1_score
 
     return float(f1_score(y_true, [predicted_label(p) for p in probs], labels=list(LABELS), average="macro",
@@ -179,7 +179,7 @@ def choose_c(X: Any, y: np.ndarray, train_idx: np.ndarray, *, text: bool, classi
             X_va = step.transform(X_va)
         for j, c in enumerate(tuning.C):
             model = clf_mod.estimator(classifier, {**params, "C": c}, seed).fit(X_tr, y_train[tr])
-            scores[k, j] = _macro_f1(y_train[va], _probabilities(model, X_va))
+            scores[k, j] = macro_f1(y_train[va], probabilities(model, X_va))
     mean = {c: float(m) for c, m in zip(tuning.C, scores.mean(axis=0))}
     best = max(sorted(tuning.C), key=lambda c: (round(mean[c], 12), -c))
     return best, mean
@@ -197,7 +197,7 @@ def _fold(X, y, split, text, classifier, params, tfidf_settings, seed, want_term
                       "inner_macro_f1": {str(c): round(s, 6) for c, s in inner.items()}}
         pipe = fit_fold(X, y, split, text=text, classifier=classifier, params=params,
                         tfidf_settings=tfidf_settings, seed=seed)
-        probs = _probabilities(pipe, _subset(X, split.test))
+        probs = probabilities(pipe, _subset(X, split.test))
     terms = None
     if want_terms:
         names = pipe.named_steps["tfidf"].get_feature_names_out()
