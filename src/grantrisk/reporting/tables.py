@@ -14,7 +14,7 @@ from typing import Any
 from grantrisk.evaluation.metrics import ERROR_SIZES, signed
 from grantrisk.labelling import scoring
 from grantrisk.labelling.scoring import FACTORS, LABELS
-from grantrisk.reporting.chain import Data, sort_sources
+from grantrisk.reporting.chain import STRATIFIED, Data, sort_sources
 from grantrisk.reporting.common import (
     LABEL_RANK, PERIODS, csv_text, fmt, hu_number, hu_value, md_document, md_table, model_name, rounded,
 )
@@ -242,29 +242,23 @@ def significance_tables(data: Data, today: str) -> tuple[str | None, str]:
     return csv, md_document("Significance", body, data, stages, today)
 
 
-def tfidf_comparison_tables(data: Data, today: str) -> tuple[str | None, str]:
-    """DEC-63: the test of INT-RQ-B, each transformer representation against TF-IDF with the same classifier."""
-    from grantrisk.evaluation.evaluate import MARGIN, OUTCOMES
+def _analysis(tuning: dict[str, Any] | None) -> str:
+    return ("`C` of logreg and svm tuned inside each training fold (DEC-63 (b), DEC-67): the confirmatory analysis"
+            if tuning else "the fixed defaults of SPEC-M2-04 (DEC-63 (a)), reported beside the confirmatory analysis")
 
-    stages = ["E2", "M2"]
-    if not data.chain.e2 or not data.tfidf_comparisons:
-        return None, md_document("Embeddings against TF-IDF", ["Not run."], data, stages, today)
-    rows = data.tfidf_comparisons
+
+def _comparison_section(rows, tuning: dict[str, Any] | None) -> list[str]:
+    """One E2 run's comparisons against TF-IDF: the table and the verdict on H1 (DEC-63)."""
+    from grantrisk.evaluation.evaluate import OUTCOMES
+
     family = [r for r in rows if r["in_family"]]
-    tuning = (data.e2_report or {}).get("m2_tuning")
-    analysis = ("`C` of logreg and svm tuned inside each training fold (DEC-63 (b), DEC-67): the confirmatory analysis"
-                if tuning else "the fixed defaults of SPEC-M2-04 (DEC-63 (a)), reported beside the confirmatory analysis")
     supported = any(r["outcome"] == "embedding_outperforms" for r in family)
 
     def result(r) -> str:
         text = OUTCOMES[r["outcome"]] if r["outcome"] else ""
         return f"{text} ({r['note']})" if text and r["note"] else text or (r["note"] or "")
 
-    body = [f"Hyperparameters: {analysis}. Difference: mean macro-F1 of the representation minus that of TF-IDF with "
-            "the same classifier over the 25 paired folds; 95% interval and p from the corrected resampled t-test "
-            f"(Nadeau and Bengio, 2003), two-sided; p (Holm) over the {len(family)} comparisons of the family. "
-            f"Practically equivalent: not significant and the interval within ±{MARGIN}. Fixed before the results "
-            "(DEC-63).", "",
+    return [f"Hyperparameters: {_analysis(tuning)}. p (Holm) over the {len(family)} comparisons of the family.", "",
             *md_table(["Representation", "Classifier", "Difference [95% interval]", "p", "p (Holm)", "Outcome"],
                       [[r["representation"], r["classifier"],
                         f"{r['mean_diff']:+.3f} [{r['ci_low']:+.3f}, {r['ci_high']:+.3f}]", fmt(r["p_value"], 4),
@@ -272,13 +266,72 @@ def tfidf_comparison_tables(data: Data, today: str) -> tuple[str | None, str]:
             "", f"H1 (INT-RQ-B) is {'supported' if supported else 'not supported'}: "
             f"{'at least one' if supported else 'no'} comparison of the family has the outcome "
             "\"embeddings outperform TF-IDF\"."]
-    csv = csv_text(["scheme", "representation", "classifier", "n_folds", "mean_diff", "sd_diff", "ci_low", "ci_high",
-                    "t_stat", "df", "p_value", "in_family", "p_holm", "outcome", "note"],
-                   [[r["scheme"], r["representation"], r["classifier"], r["n_folds"], rounded(r["mean_diff"]),
-                     rounded(r["sd_diff"]), rounded(r["ci_low"]), rounded(r["ci_high"]), rounded(r["t_stat"]), r["df"],
-                     rounded(r["p_value"], 6), r["in_family"], rounded(r["p_holm"], 6), r["outcome"] or "",
-                     r["note"] or ""] for r in rows])
+
+
+def tfidf_comparison_tables(data: Data, today: str) -> tuple[str | None, str]:
+    """DEC-63: the test of INT-RQ-B, each transformer representation against TF-IDF with the same classifier.
+
+    With an E2 run beside (DEC-70), its comparisons follow those of the chain's E2 run.
+    """
+    from grantrisk.evaluation.evaluate import MARGIN
+
+    stages = ["E2", "M2"]
+    if not data.chain.e2 or not data.tfidf_comparisons:
+        return None, md_document("Embeddings against TF-IDF", ["Not run."], data, stages, today)
+    tuning = (data.e2_report or {}).get("m2_tuning")
+    body = ["Difference: mean macro-F1 of the representation minus that of TF-IDF with the same classifier over the 25 "
+            "paired folds; 95% interval and p from the corrected resampled t-test (Nadeau and Bengio, 2003), two-sided. "
+            f"Practically equivalent: not significant and the interval within ±{MARGIN}. Fixed before the results "
+            "(DEC-63).", "", f"## E2 `{data.chain.e2}`", "", *_comparison_section(data.tfidf_comparisons, tuning)]
+    sections = [(data.chain.e2, tuning, data.tfidf_comparisons)]
+    if data.chain.e2_beside and data.tfidf_comparisons_beside:
+        tuning_beside = (data.e2_beside_report or {}).get("m2_tuning")
+        body += ["", f"## Beside it: E2 `{data.chain.e2_beside}`", "",
+                 *_comparison_section(data.tfidf_comparisons_beside, tuning_beside)]
+        sections.append((data.chain.e2_beside, tuning_beside, data.tfidf_comparisons_beside))
+    csv = csv_text(["e2_run", "hyperparameters", "scheme", "representation", "classifier", "n_folds", "mean_diff",
+                    "sd_diff", "ci_low", "ci_high", "t_stat", "df", "p_value", "in_family", "p_holm", "outcome", "note"],
+                   [[e2, "tuned" if tun else "defaults", r["scheme"], r["representation"], r["classifier"], r["n_folds"],
+                     rounded(r["mean_diff"]), rounded(r["sd_diff"]), rounded(r["ci_low"]), rounded(r["ci_high"]),
+                     rounded(r["t_stat"]), r["df"], rounded(r["p_value"], 6), r["in_family"], rounded(r["p_holm"], 6),
+                     r["outcome"] or "", r["note"] or ""] for e2, tun, rows in sections for r in rows])
     return csv, md_document("Embeddings against TF-IDF", body, data, stages, today)
+
+
+def tuning_tables(data: Data, today: str) -> tuple[str | None, str]:
+    """DEC-70: the macro-F1 of each model run with tuned `C` and with the defaults, and the `C` chosen per fold."""
+    stages = ["E2", "M2"]
+    if not data.chain.e2_beside or not data.comparison_beside:
+        return None, md_document("Tuned and default hyperparameters",
+                                 [NOT_RUN.format(what="an E2 run beside the chain's E2 run")], data, stages, today)
+    runs_ = {"M2": (data.comparison, (data.e2_report or {}).get("m2_tuning")),
+             "M2 beside": (data.comparison_beside, (data.e2_beside_report or {}).get("m2_tuning"))}
+    tuned = next((label for label, (_, tun) in runs_.items() if tun), None)
+    default = next((label for label, (_, tun) in runs_.items() if not tun), None)
+    if not tuned or not default:
+        return None, md_document("Tuned and default hyperparameters",
+                                 ["Not available: the two M2 runs do not differ in tuning."], data, stages, today)
+    f1 = {label: {(r["representation"], r["classifier"]): r["f1_macro_mean"] for r in rows
+                  if r["scheme"] == STRATIFIED and r["classifier"] != "majority"} for label, (rows, _) in runs_.items()}
+    chosen = {(g["representation"], g["classifier"]): g["tuning"]["chosen_C"]
+              for g in (data.m2_reports.get(tuned) or {}).get("grid", []) if g.get("scheme") == STRATIFIED and g.get("tuning")}
+    keys = sorted(f1[tuned], key=lambda k: (-(f1[tuned][k] or 0), k))
+    md_rows, csv_rows = [], []
+    for k in keys:
+        a, b = f1[tuned].get(k), f1[default].get(k)
+        diff = None if a is None or b is None else a - b
+        c = chosen.get(k)
+        c_text = ", ".join(f"{v}×{n}" for v, n in c.items()) if c else "–"
+        md_rows.append([k[0], k[1], fmt(a), fmt(b), "–" if diff is None else f"{diff:+.3f}", c_text])
+        csv_rows.append([k[0], k[1], rounded(a), rounded(b), rounded(diff), json.dumps(c) if c else ""])
+    tuning = runs_[tuned][1]
+    body = [f"Mean macro-F1 over the 25 folds with `C` tuned inside each training fold over {tuning['C']} "
+            f"(DEC-63 (b), DEC-67; M2 `{data.chain.runs()[tuned]}`) and with the defaults of SPEC-M2-04 (DEC-63 (a); "
+            f"M2 `{data.chain.runs()[default]}`), on the same folds. Chosen C: value × number of folds; `rf` is not tuned.",
+            "", *md_table(["Representation", "Classifier", "Tuned", "Defaults", "Difference", "Chosen C"], md_rows)]
+    csv = csv_text(["representation", "classifier", "f1_macro_tuned", "f1_macro_defaults", "difference", "chosen_C"],
+                   csv_rows)
+    return csv, md_document("Tuned and default hyperparameters", body, data, stages, today)
 
 
 def gold_validation(data: Data, today: str) -> tuple[str | None, str]:
@@ -346,6 +399,7 @@ THESIS_TABLES = {
     "period_breakdown": period_tables,
     "significance": significance_tables,
     "tfidf_comparison": tfidf_comparison_tables,
+    "tuning": tuning_tables,
     "gold_validation": gold_validation,
     "gold_label_agreement": gold_label_agreement,
 }

@@ -108,6 +108,9 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--e2-run", help="the E2 run of the chain (default: report.chain.e2_run)")
     report.add_argument("--e1-run", help="the E1 run of the chain (default: report.chain.e1_run)")
     report.add_argument("--l3-run", help="alone: a report without models (default: report.chain.l3_run)")
+    report.add_argument("--e2-beside-run", help="an E2 run reported beside the chain's E2 run, e.g. the defaults of "
+                                                "DEC-63 (a) (default: report.chain.e2_beside_run)")
+    report.add_argument("--e4-run", help="the E4 run of the chain (default: report.chain.e4_run)")
 
     explain = stage_parsers["explain"]
     explain.add_argument("--e2-run", required=True, help="the E2 run whose chain (M2, M1, L3) is analysed")
@@ -300,7 +303,7 @@ def _report(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
     from grantrisk.reporting import report
 
     run_id = report.run(conn, cfg.values, cfg.data_root, e2_run_id=args.e2_run, e1_run_id=args.e1_run,
-                        l3_run_id=args.l3_run)
+                        l3_run_id=args.l3_run, e2_beside_run_id=args.e2_beside_run, e4_run_id=args.e4_run)
     print(f"dashboard: {cfg.data_root / 'reports' / run_id / 'dashboard.html'}", file=sys.stderr)
     return run_id
 

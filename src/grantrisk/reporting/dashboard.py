@@ -29,6 +29,59 @@ def _key(key: tuple[str, str, str]) -> str:
     return "/".join(key)
 
 
+def _comparison_rows(rows) -> list[dict[str, Any]]:
+    return [{"representation": r["representation"], "classifier": r["classifier"], "diff": _r(r["mean_diff"]),
+             "low": _r(r["ci_low"]), "high": _r(r["ci_high"]), "p": _r(r["p_value"]), "holm": _r(r["p_holm"]),
+             "outcome": r["outcome"], "note": r["note"], "family": bool(r["in_family"])} for r in rows]
+
+
+def _test_rows(tests) -> list[dict[str, Any]]:
+    return [{"representation": t["representation"], "reference": t["reference"], "classifier": t["classifier"],
+             "target": t["target"], "setting": t["setting"], "diff": _r(t["mean_diff"]), "low": _r(t["ci_low"]),
+             "high": _r(t["ci_high"]), "p": _r(t["p_value"]), "holm": _r(t["p_holm"]),
+             "details": json.loads(t["details_json"]) if t["test"] == "mcnemar_exact" else None} for t in tests]
+
+
+def representations(data: Data) -> dict[str, Any] | None:
+    """DEC-63, DEC-64 and DEC-70: the comparisons against TF-IDF, tuned against defaults, and the E4 analyses."""
+    from grantrisk.evaluation.evaluate import OUTCOMES
+
+    if not data.tfidf_comparisons and not data.chain.e4:
+        return None
+    out: dict[str, Any] = {"outcomes": OUTCOMES, "comparisons": [], "tuning": None, "probes": None, "tests": {}}
+    for e2, report, rows in ((data.chain.e2, data.e2_report, data.tfidf_comparisons),
+                             (data.chain.e2_beside, data.e2_beside_report, data.tfidf_comparisons_beside)):
+        if e2 and rows:
+            out["comparisons"].append({"e2": e2, "tuned": bool((report or {}).get("m2_tuning")),
+                                       "rows": _comparison_rows(rows)})
+    if data.comparison_beside:
+        f1: dict[tuple[str, str], dict[str, float | None]] = {}
+        for label, rows in (("main", data.comparison), ("beside", data.comparison_beside)):
+            for r in rows:
+                if r["scheme"] == "stratified" and r["classifier"] != "majority":
+                    f1.setdefault((r["representation"], r["classifier"]), {})[label] = _r(r["f1_macro_mean"])
+        tuned_main = bool((data.e2_report or {}).get("m2_tuning"))
+        out["tuning"] = {"tuned": "main" if tuned_main else "beside",
+                         "rows": [{"representation": k[0], "classifier": k[1], **v} for k, v in sorted(f1.items())]}
+    if data.chain.e4:
+        probe = [r for r in data.e4_results if r["analysis"] == "factor_probe"]
+        reps = list((data.e4_report or {}).get("representations") or [])
+        targets = list(dict.fromkeys(r["target"] for r in probe))
+        cell = {(r["representation"], r["target"], r["metric"]): _r(r["mean"]) for r in probe}
+
+        def metric(t: str) -> str:
+            return "spearman" if t == "normalised_score" else "f1_macro"
+
+        out["probes"] = {"reps": reps, "rows": [
+            {"target": t, "metric": metric(t), "majority": cell.get(("majority", t, "f1_macro")),
+             "values": {rep: cell.get((rep, t, metric(t))) for rep in reps}} for t in targets]}
+        for analysis in ("factor_probe", "combination", "learning_curve", "error_overlap", "context_length"):
+            rows = [t for t in data.e4_tests if t["analysis"] == analysis]
+            if rows:
+                out["tests"][analysis] = _test_rows(rows)
+    return out
+
+
 def payload(data: Data, today: str) -> dict[str, Any]:
     """Everything the page shows, from the stored runs."""
     out: dict[str, Any] = {
@@ -102,6 +155,7 @@ def payload(data: Data, today: str) -> dict[str, Any]:
         for f in FACTORS
     }
     out["periods"] = list(PERIODS)
+    out["representations"] = representations(data)
     return out
 
 
@@ -344,6 +398,56 @@ function renderCoverage() {
     `<h2>Distribution of points per factor</h2><p class="note">Documents per point value; a near-constant factor carries little information (ISS-15).</p><div class="card">${t}</tbody></table></div>`;
 }
 
+// --- representations: DEC-63, DEC-70 and the E4 analyses (DEC-64)
+function ci(r) { return `${r.diff >= 0 ? '+' : ''}${f(r.diff)} <span class="note">[${f(r.low)}, ${f(r.high)}]</span>`; }
+function testTable(rows, first) {
+  let h = '<table><thead><tr>' + first.map(([, t]) => `<th class="l">${t}</th>`).join('') +
+    '<th>Difference [95% interval]</th><th>p</th><th>p (Holm)</th></tr></thead><tbody>';
+  for (const r of rows) h += '<tr>' + first.map(([k]) => `<td class="l">${esc(r[k] ?? '')}</td>`).join('') +
+    `<td>${ci(r)}</td><td>${f(r.p, 4)}</td><td>${f(r.holm, 4)}</td></tr>`;
+  return h + '</tbody></table>';
+}
+function renderRepresentations() {
+  const R = D.representations, el = $('#representations');
+  if (!R) { el.innerHTML = '<div class="card">Not available: no comparison against TF-IDF and no E4 run in this chain.</div>'; return; }
+  let h = '';
+  for (const c of R.comparisons) {
+    const fam = c.rows.filter(r => r.family), yes = fam.some(r => r.outcome === 'embedding_outperforms');
+    h += `<h2>Embeddings against TF-IDF (DEC-63): ${c.tuned ? 'C tuned in each training fold, the confirmatory analysis' : 'the defaults, reported beside'}</h2>` +
+      `<p class="note">E2 <code>${esc(c.e2)}</code>. Embedding minus TF-IDF with the same classifier, mean macro-F1 over the paired folds; corrected resampled t-test, Holm over the ${fam.length} comparisons of the family. H1 is <b>${yes ? 'supported' : 'not supported'}</b>.</p>` +
+      '<div class="card"><table><thead><tr><th class="l">Representation</th><th class="l">Classifier</th><th>Difference [95% interval]</th><th>p</th><th>p (Holm)</th><th class="l">Outcome</th></tr></thead><tbody>';
+    for (const r of c.rows) h += `<tr><td class="l">${esc(r.representation)}</td><td class="l">${esc(r.classifier)}</td><td>${ci(r)}</td><td>${f(r.p, 4)}</td><td>${r.holm === null ? '–' : f(r.holm, 4)}</td>` +
+      `<td class="l">${r.outcome ? esc(R.outcomes[r.outcome]) : ''}${r.note ? ' <span class="note">(' + esc(r.note) + ')</span>' : ''}</td></tr>`;
+    h += '</tbody></table></div>';
+  }
+  if (R.tuning) {
+    const a = R.tuning.tuned, b = a === 'main' ? 'beside' : 'main';
+    h += '<h2>Tuned and default hyperparameters</h2><p class="note">Mean macro-F1 over the same folds.</p><div class="card"><table><thead><tr><th class="l">Representation</th><th class="l">Classifier</th><th>Tuned</th><th>Defaults</th><th>Difference</th></tr></thead><tbody>';
+    for (const r of R.tuning.rows) { const d = (r[a] === undefined || r[b] === undefined) ? null : r[a] - r[b];
+      h += `<tr><td class="l">${esc(r.representation)}</td><td class="l">${esc(r.classifier)}</td><td>${f(r[a])}</td><td>${f(r[b])}</td><td>${d === null ? '–' : (d >= 0 ? '+' : '') + f(d)}</td></tr>`; }
+    h += '</tbody></table></div>';
+  }
+  if (R.probes) {
+    h += '<h2>Factor probes (E4, exploratory)</h2><p class="note">How well each representation predicts a factor\'s points (macro-F1) and the normalised score (Spearman). Cell shade: the value.</p><div class="card"><table class="heat"><thead><tr><th>Target</th><th>Majority</th>' +
+      R.probes.reps.map(r => `<th>${esc(r)}</th>`).join('') + '</tr></thead><tbody>';
+    for (const row of R.probes.rows) h += `<tr><td>${esc(row.target)}${row.metric === 'spearman' ? ' <span class="note">(Spearman)</span>' : ''}</td><td>${f(row.majority)}</td>` +
+      R.probes.reps.map(r => `<td class="v" style="background:${shade(row.values[r])}">${f(row.values[r])}</td>`).join('') + '</tr>';
+    h += '</tbody></table></div>';
+  }
+  const T = R.tests;
+  if (T.factor_probe) h += '<h3>Each embedding minus TF-IDF, per target</h3><div class="card">' + testTable(T.factor_probe, [['target', 'Target'], ['representation', 'Representation']]) + '</div>';
+  if (T.combination) h += '<h2>TF-IDF combined with each embedding (E4)</h2><p class="note">Combination minus TF-IDF alone, on the folds of M2.</p><div class="card">' + testTable(T.combination, [['representation', 'Combination'], ['classifier', 'Classifier']]) + '</div>';
+  if (T.learning_curve) h += '<h2>Learning curve (E4)</h2><div class="card">' + testTable(T.learning_curve, [['setting', 'Share'], ['representation', 'Representation']]) + '</div>';
+  if (T.error_overlap) {
+    h += '<h2>Error overlap with TF-IDF (E4)</h2><p class="note">Modal prediction of each document over the repeats; McNemar\'s exact test.</p><div class="card"><table><thead><tr><th class="l">Representation</th><th class="l">Classifier</th><th>Both wrong</th><th>Only embedding wrong</th><th>Only TF-IDF wrong</th><th>p</th><th>p (Holm)</th></tr></thead><tbody>';
+    for (const r of T.error_overlap) { const m = r.details.modal;
+      h += `<tr><td class="l">${esc(r.representation)}</td><td class="l">${esc(r.classifier)}</td><td>${m.both_wrong}</td><td>${m.only_embedding_wrong}</td><td>${m.only_tfidf_wrong}</td><td>${f(r.p, 4)}</td><td>${f(r.holm, 4)}</td></tr>`; }
+    h += '</tbody></table></div>';
+  }
+  if (T.context_length) h += '<h2>Context length within bge-m3 (E4)</h2><p class="note">512-token chunks minus 8,192-token chunks.</p><div class="card">' + testTable(T.context_length, [['classifier', 'Classifier']]) + '</div>';
+  el.innerHTML = h;
+}
+
 // --- provenance
 function renderProvenance() {
   let h = '<h2>Runs this page was built from</h2><div class="card"><table><thead><tr><th>Part</th><th class="l">Run</th><th class="l">Finished</th><th class="l">Code version</th></tr></thead><tbody>';
@@ -352,7 +456,7 @@ function renderProvenance() {
   h += '<h2>Parts not in this chain</h2><div class="card">' + (D.missing.length ? '<ul>' + D.missing.map(m => `<li>${esc(m)}</li>`).join('') + '</ul>' : 'None.') + '</div>';
   $('#provenance').innerHTML = h;
 }
-renderModels(); renderExtraction(); renderLabels(); renderCoverage(); renderProvenance();
+renderModels(); renderRepresentations(); renderExtraction(); renderLabels(); renderCoverage(); renderProvenance();
 """
 
 
@@ -374,6 +478,7 @@ def build(data: Data, today: str) -> str:
 <p class="sub">{len(data.labels)} documents. The ML reference is the tercile label (DEC-07); every number comes from the stored runs named under Provenance.</p>
 <nav role="tablist">
 <button data-view="models" aria-selected="true">Models</button>
+<button data-view="representations" aria-selected="false">Representations</button>
 <button data-view="extraction" aria-selected="false">Extraction</button>
 <button data-view="labels" aria-selected="false">Labels</button>
 <button data-view="coverage" aria-selected="false">Coverage</button>
@@ -382,6 +487,7 @@ def build(data: Data, today: str) -> str:
 </header>
 <main>
 <section id="models"></section>
+<section id="representations" hidden></section>
 <section id="extraction" hidden></section>
 <section id="labels" hidden></section>
 <section id="coverage" hidden></section>

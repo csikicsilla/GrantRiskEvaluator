@@ -256,8 +256,13 @@ def reproduction(data: Data, today: str) -> str:
     steps.append(("L3", f"python -m grantrisk label --l2-run {c.l2} --c1-run {c.c1}", c.l3))
     if c.m1:
         steps.append(("M1", f"python -m grantrisk represent --c2-run {c.c2}", c.m1))
-    if c.m2:
-        steps.append(("M2", f"python -m grantrisk train --m1-run {c.m1} --l3-run {c.l3}", c.m2))
+    def tuned(label: str) -> bool:
+        return bool((json.loads(info[label]["config_json"]).get("m2_run") or {}).get("tuning")) if label in info else False
+
+    for label, run_id in (("M2", c.m2), ("M2 beside", c.m2_beside)):
+        if run_id:
+            flag = "" if tuned(label) else " --no-tuning"
+            steps.append((label, f"python -m grantrisk train --m1-run {c.m1} --l3-run {c.l3}{flag}", run_id))
     if c.e1:
         runs_ = ",".join(r for _, r in sorted(c.e1_l1.items()))
         extraction = f" --extraction-runs {runs_}" if runs_ else ""  # the old baseline alone needs none
@@ -265,8 +270,15 @@ def reproduction(data: Data, today: str) -> str:
                             f"--c1-run {c.c1}{extraction}", c.e1))
     if c.e2:
         steps.append(("E2", f"python -m grantrisk evaluate --m2-run {c.m2}", c.e2))
+    if c.e2_beside:
+        steps.append(("E2 beside", f"python -m grantrisk evaluate --m2-run {c.m2_beside}", c.e2_beside))
+    if c.e4:
+        e2_of_e4 = ((data.e4_report or {}).get("input_runs") or {}).get("E2", c.e2)
+        steps.append(("E4", f"python -m grantrisk explain --e2-run {e2_of_e4}", c.e4))
     report_args = " ".join(a for a in (f"--e2-run {c.e2}" if c.e2 else f"--l3-run {c.l3}",
-                                       f"--e1-run {c.e1}" if c.e1 else "") if a)
+                                       f"--e1-run {c.e1}" if c.e1 else "",
+                                       f"--e2-beside-run {c.e2_beside}" if c.e2_beside else "",
+                                       f"--e4-run {c.e4}" if c.e4 else "") if a)
     rows = [[stage, f"`{cmd}`", f"`{run_id}`", f"`{info[stage]['config_hash'][:12]}`" if stage in info else ""]
             for stage, cmd, run_id in steps]
     body = [
@@ -366,7 +378,11 @@ def data_flow(data: Data, today: str) -> str:
         "    E1 -. preferred source per factor .-> L2",
         "    M2 --> " + node("E2", "Evaluate models"),
         "    L3 -- tercile and fixed labels --> E2",
+        "    E2 --> " + node("E4", "Explain"),
+        "    M1 -- vectors, texts --> E4",
+        "    L3 -- points, scores --> E4",
         '    E1 --> E3["E3 Report"]',
         "    E2 --> E3",
+        "    E4 --> E3",
     ]
     return "\n".join(lines) + "\n" + provenance(data, list(runs_), today, comment="%% ")

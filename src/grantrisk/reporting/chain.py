@@ -2,7 +2,9 @@
 
 E3 creates no new numbers: everything here is read from stored runs. The chain is
 found through the lineage the runs record (ARC-02): the E2 run names its M2, L3 and
-C1 runs, the L3 run its L2 and C1 runs, and the L2 run its L1 and C2 runs.
+C1 runs, the L3 run its L2 and C1 runs, and the L2 run its L1 and C2 runs. Two runs
+may be added by name (DEC-70): a second E2 run reported beside the first (the defaults
+of DEC-63 (a)), on the same L3 and M1 runs, and the E4 run built on one of the two.
 """
 
 from __future__ import annotations
@@ -41,6 +43,9 @@ class Chain:
     e1: str | None = None
     e1_l1: dict[str, str] = field(default_factory=dict)  # the L1 runs E1 evaluated
     e2: str | None = None
+    m2_beside: str | None = None  # DEC-70: the M2 run of the E2 run reported beside (DEC-63 (a))
+    e2_beside: str | None = None
+    e4: str | None = None  # DEC-64: the explanatory analyses
 
     def runs(self) -> dict[str, str]:
         """Label → run id, in the order of the pipeline."""
@@ -49,11 +54,11 @@ class Chain:
             out["C2"] = self.c2
         out.update({f"L1 {s}": r for s, r in sorted(self.l1.items())})
         out.update({"L2": self.l2, "L3": self.l3})
-        for label, run_id in (("M1", self.m1), ("M2", self.m2)):
+        for label, run_id in (("M1", self.m1), ("M2", self.m2), ("M2 beside", self.m2_beside)):
             if run_id:
                 out[label] = run_id
         out.update({f"L1 {s} (E1)": r for s, r in sorted(self.e1_l1.items()) if self.l1.get(s) != r})
-        for label, run_id in (("E1", self.e1), ("E2", self.e2)):
+        for label, run_id in (("E1", self.e1), ("E2", self.e2), ("E2 beside", self.e2_beside), ("E4", self.e4)):
             if run_id:
                 out[label] = run_id
         return out
@@ -69,6 +74,8 @@ class Chain:
             out.append("E2 (evaluate models)")
         if not self.e1:
             out.append("E1 (validate extraction)")
+        if not self.e4:
+            out.append("E4 (explanatory analyses)")
         if "regex" not in self.l1:
             out.append("L1 regex in the labelling chain")
         if not any(s.startswith("llm:") for s in self.l1):
@@ -104,6 +111,8 @@ def resolve(
     e2_run_id: str | None = None,
     e1_run_id: str | None = None,
     l3_run_id: str | None = None,
+    e2_beside_run_id: str | None = None,
+    e4_run_id: str | None = None,
 ) -> Chain:
     """Find the chain from the E2 run (or, without models, from the L3 run) through the lineage."""
     if e2_run_id:
@@ -128,6 +137,22 @@ def resolve(
         runs.require_complete(conn, e1_run_id, "E1")
         chain.e1 = e1_run_id
         chain.e1_l1 = {s: r for s, r in _l1_sources(conn, _inputs_of(conn, e1_run_id, "L1")).items() if s != "manual"}
+    if (e2_beside_run_id or e4_run_id) and not e2_run_id:
+        raise E3InputError("an E2 run beside, or an E4 run, needs the E2 run of the chain")
+    if e2_beside_run_id:
+        runs.require_complete(conn, e2_beside_run_id, "E2")
+        if _single(conn, e2_beside_run_id, "L3") != chain.l3:
+            raise E3InputError(f"E2 run {e2_beside_run_id} did not evaluate L3 run {chain.l3}")
+        chain.m2_beside = _single(conn, e2_beside_run_id, "M2")
+        if _single(conn, chain.m2_beside, "M1", required=False) != chain.m1:
+            raise E3InputError(f"M2 run {chain.m2_beside} was not trained on M1 run {chain.m1}")
+        chain.e2_beside = e2_beside_run_id
+    if e4_run_id:
+        runs.require_complete(conn, e4_run_id, "E4")
+        e2_of_e4 = _single(conn, e4_run_id, "E2")
+        if e2_of_e4 not in (chain.e2, chain.e2_beside):
+            raise E3InputError(f"E4 run {e4_run_id} was built on E2 run {e2_of_e4}, which is not in this chain")
+        chain.e4 = e4_run_id
     for run_id in chain.runs().values():
         row = runs.get(conn, run_id)
         if row["status"] != "complete":
@@ -166,6 +191,13 @@ class Data:
     grid: list[sqlite3.Row] = field(default_factory=list)
     significance: list[sqlite3.Row] = field(default_factory=list)
     tfidf_comparisons: list[sqlite3.Row] = field(default_factory=list)  # DEC-63
+    comparison_beside: list[sqlite3.Row] = field(default_factory=list)  # DEC-70: the E2 run beside
+    tfidf_comparisons_beside: list[sqlite3.Row] = field(default_factory=list)
+    e2_beside_report: dict[str, Any] | None = None
+    m2_reports: dict[str, dict[str, Any]] = field(default_factory=dict)  # "M2" / "M2 beside" → report (chosen C)
+    e4_results: list[sqlite3.Row] = field(default_factory=list)
+    e4_tests: list[sqlite3.Row] = field(default_factory=list)
+    e4_report: dict[str, Any] | None = None
     label_distributions: list[sqlite3.Row] = field(default_factory=list)
     models: dict[tuple[str, str, str], ModelData] = field(default_factory=dict)
     e2_report: dict[str, Any] | None = None
@@ -275,6 +307,19 @@ def load(conn: sqlite3.Connection, data_root: Path, chain: Chain) -> Data:
         for r in conn.execute("SELECT * FROM top_terms WHERE run_id = ? AND scheme = ? ORDER BY class_label, rank",
                               (c.m2, STRATIFIED)):
             data.top_terms.setdefault(r["class_label"], []).append(r)
+        data.m2_reports["M2"] = _report(conn, data_root, c.m2)
+    if c.e2_beside:
+        data.comparison_beside = conn.execute(
+            "SELECT * FROM model_comparison WHERE run_id = ? ORDER BY scheme != 'stratified', scheme, rank,"
+            " representation, classifier", (c.e2_beside,)).fetchall()
+        data.tfidf_comparisons_beside = conn.execute(
+            "SELECT * FROM tfidf_comparisons WHERE run_id = ? ORDER BY in_family DESC, rowid", (c.e2_beside,)).fetchall()
+        data.e2_beside_report = _report(conn, data_root, c.e2_beside)
+        data.m2_reports["M2 beside"] = _report(conn, data_root, c.m2_beside)
+    if c.e4:
+        data.e4_results = conn.execute("SELECT * FROM explain_results WHERE run_id = ? ORDER BY rowid", (c.e4,)).fetchall()
+        data.e4_tests = conn.execute("SELECT * FROM explain_tests WHERE run_id = ? ORDER BY rowid", (c.e4,)).fetchall()
+        data.e4_report = _report(conn, data_root, c.e4)
     if c.e1:
         data.e1_agreements = conn.execute(
             "SELECT * FROM extraction_agreements WHERE run_id = ? AND subset = 'all' ORDER BY source, factor",

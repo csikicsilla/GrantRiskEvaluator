@@ -200,3 +200,5 @@ report:                    # E3; the chain of runs the report is built from (Spe
     e2_run: null           # the E2 run; its M2, L3 and C1 runs and theirs follow from the lineage
     e1_run: null           # the E1 run of the gold validation; null leaves the extraction part out
     l3_run: null           # only for a report without models (no E2 run)
+    e2_beside_run: null    # an E2 run on the same L3 and M1 runs, reported beside (DEC-63 (a), DEC-70)
+    e4_run: null           # the E4 run built on one of the two E2 runs (DEC-64, DEC-70)

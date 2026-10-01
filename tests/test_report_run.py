@@ -334,3 +334,61 @@ def test_chain_errors(built):
     with pytest.raises(ValueError, match="is a L2 run"):
         report.run(conn, {}, data_root, l3_run_id=ids["l2"])
     assert conn.execute("SELECT COUNT(*) FROM runs WHERE stage = 'E3' AND status = 'running'").fetchone()[0] == 0
+
+
+# --- DEC-70: the E2 run beside and the E4 run --------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def beside(built):
+    """A tuned M2 run on the chain's M1 and L3 runs, its E2 run and an E4 run on it; the chain's E2 run is untuned."""
+    from grantrisk.evaluation import explain
+
+    conn, data_root, ids = built
+    config = {**CONFIG, "train": {**CONFIG["train"], "tuning": {"enabled": True, "C": [0.1, 10.0]}},
+              "explain": {"analyses": ["factor_probe", "combination", "error_overlap", "context_length"],
+                          "probe_cv": {"n_repeats": 1}, "combination_classifiers": ["logreg"]}}
+    m2 = train.run(conn, config, data_root, m1_run_id=ids["m1"], l3_run_id=ids["l3"], classifiers=["logreg"])
+    e2 = evaluate.run(conn, config, data_root, m2_run_id=m2)
+    e4 = explain.run(conn, config, data_root, e2_run_id=e2)
+    e3 = report.run(conn, config, data_root, e2_run_id=e2, e1_run_id=ids["e1"], e2_beside_run_id=ids["e2"],
+                    e4_run_id=e4, today=TODAY)
+    return {"m2": m2, "e2": e2, "e4": e4, "e3": e3}
+
+
+def test_report_with_the_defaults_beside_and_e4(built, beside):
+    conn, data_root, ids = built
+    run = runs.get(conn, beside["e3"])
+    rep = json.loads((data_root / run["report_path"]).read_text(encoding="utf-8"))
+    assert rep["input_runs"]["E2"] == beside["e2"] and rep["input_runs"]["M2"] == beside["m2"]
+    assert rep["input_runs"]["E2 beside"] == ids["e2"] and rep["input_runs"]["M2 beside"] == ids["m2"]
+    assert rep["input_runs"]["E4"] == beside["e4"] and "E4 (explanatory analyses)" not in rep["missing"]
+    for name in ("tables/tuning.md", "tables/tuning.csv", "tables/e4_factor_probes.md", "tables/e4_factor_probes.csv",
+                 "tables/e4_combination.md", "tables/e4_error_overlap.md", "tables/e4_tests.csv"):
+        assert name in rep["files"], name
+    comparison = read(data_root, beside["e3"], "tables/tfidf_comparison.md")
+    assert f"## Beside it: E2 `{ids['e2']}`" in comparison
+    assert "tuned inside each training fold" in comparison and "the fixed defaults of SPEC-M2-04" in comparison
+    rows = list(csv.DictReader(io.StringIO(read(data_root, beside["e3"], "tables/tfidf_comparison.csv"))))
+    assert {r["hyperparameters"] for r in rows} == {"tuned", "defaults"}
+    tuning = read(data_root, beside["e3"], "tables/tuning.md")
+    assert "| tfidf | logreg |" in tuning and "×" in tuning  # the chosen C per fold
+    assert "Not run: the E4 run did not run `learning_curve`." in read(data_root, beside["e3"],
+                                                                        "tables/e4_learning_curve.md")
+    assert "Not compared" in read(data_root, beside["e3"], "tables/e4_context_length.md")
+    probes = read(data_root, beside["e3"], "tables/e4_factor_probes.md")
+    assert "## Macro-F1" in probes and "Exploratory (DEC-64)" in probes and f"E4 `{beside['e4']}`" in probes
+    dashboard = read(data_root, beside["e3"], "dashboard.html")
+    assert 'id="representations"' in dashboard and '"probes":{' in dashboard
+    reproduction = read(data_root, beside["e3"], "appendix/8_3_reproduction.md")
+    assert f"--l3-run {ids['l3']} --no-tuning" in reproduction  # the M2 run beside used the defaults
+    assert f"explain --e2-run {beside['e2']}" in reproduction and f"--e4-run {beside['e4']}" in reproduction
+    assert 'E4["E4 Explain' in read(data_root, beside["e3"], "appendix/data_flow.mmd")
+
+
+def test_the_runs_beside_must_belong_to_the_chain(built, beside):
+    conn, data_root, ids = built
+    with pytest.raises(E3InputError, match="not in this chain"):
+        report.run(conn, CONFIG, data_root, e2_run_id=ids["e2"], e4_run_id=beside["e4"], today=TODAY)
+    with pytest.raises(E3InputError, match="needs the E2 run"):
+        report.run(conn, CONFIG, data_root, l3_run_id=ids["l3"], e4_run_id=beside["e4"], today=TODAY)
