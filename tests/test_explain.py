@@ -61,6 +61,19 @@ def test_factor_probes_find_what_a_representation_carries():
     assert len([v for v in values if v.representation == "tfidf" and v.metric == "f1_macro"]) == 10  # 5 × 2 folds
 
 
+def test_rare_point_values_do_not_stop_the_probes():
+    """A factor whose every value is rarer than the folds is skipped; a fold whose training part holds one value
+    predicts that value."""
+    rare = {d: i % 6 for i, d in enumerate(DOCS)}  # six values, five documents each
+    few = {d: (1 if i == 0 else 0) for i, d in enumerate(DOCS)}  # value 1 in one document: one fold trains on 0 only
+    sparse = {d: i % 8 for i, d in enumerate(DOCS[:24])}  # eight values, three documents each
+    values, notes = explain.factor_probes(inputs(points={"fin_form": rare, "tam_osszeg": few, "eloleg": sparse}),
+                                          settings(), PARAMS, TFIDF)
+    assert any(n.startswith("eloleg: no point value occurs in 5 documents") for n in notes)
+    assert {v.target for v in values} == {"fin_form", "tam_osszeg"}
+    assert any(n.startswith("tam_osszeg: point value(s) ['1']") for n in notes)
+
+
 def test_only_probed_origins_are_read(tmp_path):
     """Imputed (mean) and rule-set points are left out of the probes."""
     data_root = tmp_path / "data"

@@ -170,6 +170,9 @@ def factor_probes(inputs: Inputs, s: Settings, params: Mapping[str, Any], tfidf:
         if len(counts) < 2:
             notes.append(f"{factor}: {len(pos)} documents with {len(counts)} point value(s); not probed")
             continue
+        if max(counts.values()) < s.probe_splits:  # stratified folds need one value with a document per fold
+            notes.append(f"{factor}: no point value occurs in {s.probe_splits} documents; not probed")
+            continue
         small = sorted(c for c, n in counts.items() if n < s.probe_splits)
         if small:
             notes.append(f"{factor}: point value(s) {small} occur in fewer than {s.probe_splits} documents")
@@ -184,10 +187,14 @@ def factor_probes(inputs: Inputs, s: Settings, params: Mapping[str, Any], tfidf:
         for rep, X in inputs.features.items():
             Xf = _subset(X, pos)
             for r, k, tr, te in splits:
-                pipe = clf_mod.build("logreg", params["logreg"], text=rep == TFIDF, tfidf_settings=tfidf,
-                                     seed=s.random_state)
-                _quiet(lambda: pipe.fit(_subset(Xf, tr), yf[tr]))
-                for metric, v in _class_scores(yf[te], pipe.predict(_subset(Xf, te))).items():
+                if len(set(yf[tr].tolist())) < 2:  # a rare value left the training part with one value only
+                    predicted = np.full(len(te), yf[tr][0])
+                else:
+                    pipe = clf_mod.build("logreg", params["logreg"], text=rep == TFIDF, tfidf_settings=tfidf,
+                                         seed=s.random_state)
+                    _quiet(lambda: pipe.fit(_subset(Xf, tr), yf[tr]))
+                    predicted = pipe.predict(_subset(Xf, te))
+                for metric, v in _class_scores(yf[te], predicted).items():
                     out.append(FoldValue("factor_probe", rep, "logreg", factor, NONE, r, k, metric, v, len(te) / len(tr)))
             if progress:
                 progress(f"factor_probe {factor} {rep}")
