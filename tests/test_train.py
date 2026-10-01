@@ -147,3 +147,77 @@ def test_grouped_splits_keep_each_series_on_one_side():
     for r in range(5):
         tested = np.concatenate([s.test for s in splits if s.repeat == r])
         assert sorted(tested) == list(range(len(Y)))
+
+
+# --- Tuning of C inside the training folds (DEC-63 (b)) ---------------------------------------
+
+TUNING = train.Tuning(C=(0.01, 1.0, 100.0))
+
+
+def test_tuning_reads_the_configuration():
+    assert train.Tuning.of(None) is None and train.Tuning.of({"enabled": False}) is None
+    t = train.Tuning.of({"enabled": True, "C": [0.1, 10], "inner_splits": 3})
+    assert t.C == (0.1, 10.0) and t.classifiers == ("logreg", "svm") and t.applies("svm") and not t.applies("rf")
+    with pytest.raises(ValueError, match="can be tuned"):
+        train.Tuning.of({"enabled": True, "classifiers": ["rf"]})
+
+
+@pytest.mark.parametrize("text", [False, True])
+def test_c_is_chosen_from_the_training_part_only(text):
+    """The documents of the test part can change without changing the choice."""
+    split = train.stratified_splits(Y, CV)[0]
+    X = list(X_TEXT) if text else X_DENSE.copy()
+    kwargs = dict(text=text, classifier="logreg", params=classifiers.params("logreg"),
+                  tfidf_settings={"min_df": 1}, seed=42, tuning=TUNING)
+    before = train.choose_c(X, np.asarray(Y), split.train, **kwargs)
+    for i in split.test:
+        if text:
+            X[i] = "egészen más szöveg " * 50
+        else:
+            X[i] = 100.0
+    assert train.choose_c(X, np.asarray(Y), split.train, **kwargs) == before
+    best, scores = before
+    assert set(scores) == set(TUNING.C) and all(0.0 <= s <= 1.0 for s in scores.values())
+
+
+def test_a_tie_goes_to_the_smaller_c():
+    """Separable classes: every C scores 1.0, and the strongest regularisation is chosen."""
+    X = np.array([[10.0 * (y == label) for label in LABELS] for y in Y])
+    split = train.stratified_splits(Y, CV)[0]
+    best, scores = train.choose_c(X, np.asarray(Y), split.train, text=False, classifier="logreg",
+                                  params=classifiers.params("logreg"), tfidf_settings=None,
+                                  seed=42, tuning=train.Tuning(C=(100.0, 1.0, 0.01)))
+    assert set(scores.values()) == {1.0} and best == 0.01
+
+
+def test_the_chosen_c_is_the_one_fitted_on_the_training_fold():
+    """With a single candidate, the tuned run equals an untuned run with that C."""
+    splits = train.stratified_splits(Y, CVSettings(n_repeats=1))
+    tuned = train.fit_predict(X_DENSE, Y, splits, text=False, classifier="logreg", params=classifiers.params("logreg"),
+                              tuning=train.Tuning(C=(0.05,)))
+    fixed = train.fit_predict(X_DENSE, Y, splits, text=False, classifier="logreg",
+                              params=classifiers.params("logreg", {"C": 0.05}))
+    assert np.allclose(tuned.probabilities, fixed.probabilities)
+    assert [c["C"] for c in tuned.tuning] == [0.05] * 5
+
+
+@pytest.mark.parametrize("classifier", classifiers.CLASSIFIERS)
+def test_every_fold_records_its_choice_for_the_tuned_classifiers_only(classifier):
+    splits = train.stratified_splits(Y, CVSettings(n_repeats=2))
+    result = train.fit_predict(X_TEXT, Y, splits, text=True, classifier=classifier,
+                               params=classifiers.params(classifier, FAST.get(classifier)), tuning=TUNING)
+    if classifier not in ("logreg", "svm"):
+        assert result.tuning is None
+        return
+    assert [(c["repeat"], c["fold"]) for c in result.tuning] == [(r, f) for r in range(2) for f in range(5)]
+    assert all(c["C"] in TUNING.C and set(c["inner_macro_f1"]) == {"0.01", "1.0", "100.0"} for c in result.tuning)
+    summary = train.tuning_summary(result.tuning)
+    assert sum(summary["chosen_C"].values()) == 10
+
+
+def test_tuned_folds_in_parallel_give_the_same_result():
+    splits = train.stratified_splits(Y, CVSettings(n_repeats=1))
+    kwargs = dict(text=False, classifier="svm", params=classifiers.params("svm"), tuning=TUNING)
+    a = train.fit_predict(X_DENSE, Y, splits, **kwargs)
+    b = train.fit_predict(X_DENSE, Y, splits, n_jobs=2, **kwargs)
+    assert np.allclose(a.probabilities, b.probabilities) and a.tuning == b.tuning

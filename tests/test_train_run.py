@@ -167,3 +167,26 @@ def test_dense_features_come_from_the_cache(conn, data_root):
     docs = sorted(TEXTS)
     matrix = represent.load_features(conn, data_root, m1, "hubert", docs)
     assert matrix.shape[0] == N and np.isfinite(matrix).all()
+
+
+def test_tuning_is_recorded_and_can_be_switched_off(conn, data_root):
+    """DEC-63: (b) C tuned inside the training folds; (a) the defaults with tuning=False."""
+    m1, l3 = seed(conn, data_root)
+    config = {**CONFIG, "train": {**CONFIG["train"], "tuning": {"enabled": True, "C": [0.1, 10]}}}
+    tuned = train.run(conn, config, data_root, m1_run_id=m1, l3_run_id=l3, classifiers=["logreg", "rf"])
+    params = {(r["representation"], r["classifier"]): json.loads(r["params_json"]) for r in conn.execute(
+        "SELECT representation, classifier, params_json FROM model_runs WHERE run_id = ?", (tuned,))}
+    assert params[("tfidf", "logreg")]["C"] == "tuned" and params[("tfidf", "logreg")]["tuning"]["C"] == [0.1, 10.0]
+    assert "tuning" not in params[("tfidf", "rf")]
+    report = json.loads((data_root / runs.get(conn, tuned)["report_path"]).read_text(encoding="utf-8"))
+    logreg = [g for g in report["grid"] if g["classifier"] == "logreg"]
+    assert all(sum(g["tuning"]["chosen_C"].values()) == 25 for g in logreg)
+    assert report["tuning"]["inner_splits"] == 3
+    assert json.loads(runs.get(conn, tuned)["config_json"])["m2_run"]["tuning"]["C"] == [0.1, 10.0]
+
+    defaults = train.run(conn, config, data_root, m1_run_id=m1, l3_run_id=l3, classifiers=["logreg"], tuning=False)
+    params = json.loads(conn.execute("SELECT params_json FROM model_runs WHERE run_id = ? AND classifier = 'logreg'"
+                                     " AND representation = 'tfidf'", (defaults,)).fetchone()[0])
+    assert params["C"] == 1.0
+    report = json.loads((data_root / runs.get(conn, defaults)["report_path"]).read_text(encoding="utf-8"))
+    assert report["tuning"] is None and all("tuning" not in g for g in report["grid"])

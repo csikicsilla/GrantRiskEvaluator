@@ -2,7 +2,8 @@
 
 Everything that learns from data sits in one pipeline, so it is fitted only on the
 training part of a fold (SPEC-M2-03): the TF-IDF vectoriser, the scaler and the
-classifier.
+classifier. With tuning (DEC-63 (b)), `C` of `logreg` and `svm` is chosen inside the
+training part as well (train.choose_c).
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from typing import Any
 from grantrisk.modelling import tfidf
 
 CLASSIFIERS = ("logreg", "svm", "rf", "majority")
+TUNABLE = ("logreg", "svm")  # the classifiers with a `C` (DEC-63 (b))
 
 DEFAULTS: dict[str, dict[str, Any]] = {
     "logreg": {"C": 1.0, "class_weight": "balanced", "max_iter": 5000},
@@ -31,7 +33,8 @@ def params(classifier: str, overrides: Mapping[str, Any] | None = None) -> dict[
     return {**DEFAULTS[classifier], **(overrides or {})}
 
 
-def _estimator(classifier: str, p: Mapping[str, Any], seed: int):
+def estimator(classifier: str, p: Mapping[str, Any], seed: int):
+    """A new, unfitted classifier, without the steps before it."""
     if classifier == "logreg":
         from sklearn.linear_model import LogisticRegression
 
@@ -56,19 +59,24 @@ def _estimator(classifier: str, p: Mapping[str, Any], seed: int):
     raise ValueError(f"unknown classifier {classifier!r}")
 
 
-def build(classifier: str, p: Mapping[str, Any], *, text: bool, tfidf_settings: Mapping[str, Any] | None, seed: int):
-    """A new, unfitted pipeline for one fold.
+def preprocessing(classifier: str, *, text: bool, tfidf_settings: Mapping[str, Any] | None) -> list[tuple[str, Any]]:
+    """The new, unfitted steps before the classifier.
 
-    ``text``: the features are plain texts, vectorised by TF-IDF inside the pipeline.
-    Otherwise they are dense embeddings, standardised before ``logreg`` and ``svm``.
+    ``text``: the features are plain texts, vectorised by TF-IDF. Otherwise they are
+    dense embeddings, standardised before ``logreg`` and ``svm``.
     """
-    from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
 
-    steps = []
     if text:
-        steps.append(("tfidf", tfidf.vectorizer(tfidf_settings)))  # already L2-normalised; not standardised
-    elif classifier in ("logreg", "svm"):
-        steps.append(("scale", StandardScaler()))
-    steps.append(("clf", _estimator(classifier, p, seed)))
-    return Pipeline(steps)
+        return [("tfidf", tfidf.vectorizer(tfidf_settings))]  # already L2-normalised; not standardised
+    if classifier in ("logreg", "svm"):
+        return [("scale", StandardScaler())]
+    return []
+
+
+def build(classifier: str, p: Mapping[str, Any], *, text: bool, tfidf_settings: Mapping[str, Any] | None, seed: int):
+    """A new, unfitted pipeline for one fold: the preprocessing steps and the classifier."""
+    from sklearn.pipeline import Pipeline
+
+    steps = preprocessing(classifier, text=text, tfidf_settings=tfidf_settings)
+    return Pipeline([*steps, ("clf", estimator(classifier, p, seed))])

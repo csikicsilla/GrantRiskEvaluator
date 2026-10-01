@@ -90,6 +90,8 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--l3-run", required=True, help="the L3 run whose tercile labels are the target")
     train.add_argument("--representations", help="comma-separated (default: train.representations)")
     train.add_argument("--classifiers", help="comma-separated (default: train.classifiers)")
+    train.add_argument("--no-tuning", action="store_true",
+                       help="the defaults of SPEC-M2-04 without tuning C (DEC-63 (a)), whatever train.tuning says")
 
     validate = stage_parsers["validate"]
     validate.add_argument("--manual-run", required=True, help="the L1 run of the manual (gold) import")
@@ -271,7 +273,7 @@ def _train(conn, cfg: config_mod.Config, args: argparse.Namespace) -> str:
     return train.run(
         conn, cfg.values, cfg.data_root, m1_run_id=args.m1_run, l3_run_id=args.l3_run,
         representations=_names(args.representations), classifiers=_names(args.classifiers),
-        progress=lambda line: print(line, file=sys.stderr, flush=True),
+        tuning=False if args.no_tuning else None, progress=lambda line: print(line, file=sys.stderr, flush=True),
     )
 
 

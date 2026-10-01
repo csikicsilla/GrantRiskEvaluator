@@ -4,6 +4,10 @@ Every classifier is cross-validated on every representation with one stored fold
 assignment, and every prediction comes from a model that did not see the document
 (INT-EVAL-10). ``fit_predict`` is the pure computation; ``run`` reads an M1 and an
 L3 run and writes the fold assignment, the model runs and the predictions.
+
+With tuning (DEC-63 (b), the confirmatory analysis), ``C`` of ``logreg`` and ``svm`` is
+chosen inside each training fold by an inner stratified cross-validation on macro-F1,
+the same way for every representation; without it, the defaults of SPEC-M2-04 hold (a).
 """
 
 from __future__ import annotations
@@ -47,12 +51,43 @@ class Split:
     test: np.ndarray
 
 
+@dataclass(frozen=True)
+class Tuning:
+    """DEC-63 (b): the values of ``C`` tried inside each training fold, and the inner folds."""
+
+    C: tuple[float, ...] = (0.01, 0.1, 1.0, 10.0, 100.0)
+    classifiers: tuple[str, ...] = clf_mod.TUNABLE
+    inner_splits: int = 3
+
+    @classmethod
+    def of(cls, settings: Mapping[str, Any] | None) -> Tuning | None:
+        """The tuning in ``train.tuning`` of the configuration; None when it is off."""
+        if not settings or not settings.get("enabled"):
+            return None
+        t = cls(tuple(float(c) for c in settings.get("C", cls.C)),
+                tuple(settings.get("classifiers", cls.classifiers)), int(settings.get("inner_splits", cls.inner_splits)))
+        untunable = sorted(set(t.classifiers) - set(clf_mod.TUNABLE))
+        if untunable or not t.C or t.inner_splits < 2:
+            raise ValueError(f"train.tuning: C must be non-empty, inner_splits at least 2, and only {list(clf_mod.TUNABLE)} "
+                             f"can be tuned (got {untunable})")
+        return t
+
+    def applies(self, classifier: str) -> bool:
+        return classifier in self.classifiers
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"C": list(self.C), "classifiers": list(self.classifiers), "inner_splits": self.inner_splits,
+                "inner_cv": "StratifiedKFold, shuffled with cv.random_state", "scoring": "macro_f1",
+                "tie": "the smaller C"}
+
+
 @dataclass
 class ModelResult:
     probabilities: np.ndarray  # repeat × document × (low, medium, high)
     folds: np.ndarray  # repeat × document: the fold in which the document was tested
     warnings: dict[str, int] = field(default_factory=dict)
     top_terms: dict[str, list[tuple[str, float, int]]] | None = None
+    tuning: list[dict[str, Any]] | None = None  # per fold: the chosen C and the inner macro-F1 of each C
 
 
 def check_classes(y: Sequence[str], n_splits: int) -> None:
@@ -106,17 +141,63 @@ def fit_fold(X: Any, y: np.ndarray, split: Split, *, text: bool, classifier: str
     return pipe
 
 
-def _fold(X, y, split, text, classifier, params, tfidf_settings, seed, want_terms):
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        pipe = fit_fold(X, y, split, text=text, classifier=classifier, params=params,
-                        tfidf_settings=tfidf_settings, seed=seed)
-        raw = pipe.predict_proba(_subset(X, split.test))
-    classes = list(pipe.classes_)
-    probs = np.zeros((len(split.test), len(LABELS)))
+def _probabilities(model: Any, X: Any) -> np.ndarray:
+    """predict_proba in the order of LABELS."""
+    raw = model.predict_proba(X)
+    classes = list(model.classes_)
+    probs = np.zeros((raw.shape[0], len(LABELS)))
     for j, label in enumerate(LABELS):
         if label in classes:  # always, with stratified folds (SPEC-M2-05)
             probs[:, j] = raw[:, classes.index(label)]
+    return probs
+
+
+def _macro_f1(y_true: Sequence[str], probs: np.ndarray) -> float:
+    from sklearn.metrics import f1_score
+
+    return float(f1_score(y_true, [predicted_label(p) for p in probs], labels=list(LABELS), average="macro",
+                          zero_division=0))
+
+
+def choose_c(X: Any, y: np.ndarray, train_idx: np.ndarray, *, text: bool, classifier: str, params: Mapping[str, Any],
+             tfidf_settings: Mapping[str, Any] | None, seed: int, tuning: Tuning) -> tuple[float, dict[float, float]]:
+    """DEC-63 (b): the ``C`` with the highest mean macro-F1 in an inner stratified CV of one training part.
+
+    Only the training part is seen. The preprocessing (TF-IDF or the scaler) is fitted on each
+    inner training part, once for every ``C``; labels are predicted as in the outer folds (the
+    argmax of the probabilities). A tie goes to the smaller ``C``, the stronger regularisation.
+    """
+    from sklearn.model_selection import StratifiedKFold
+
+    X_train, y_train = _subset(X, train_idx), y[train_idx]
+    inner = StratifiedKFold(n_splits=tuning.inner_splits, shuffle=True, random_state=seed)
+    scores = np.zeros((tuning.inner_splits, len(tuning.C)))
+    for k, (tr, va) in enumerate(inner.split(np.zeros(len(y_train)), y_train)):
+        X_tr, X_va = _subset(X_train, tr), _subset(X_train, va)
+        for _, step in clf_mod.preprocessing(classifier, text=text, tfidf_settings=tfidf_settings):
+            X_tr = step.fit_transform(X_tr, y_train[tr])
+            X_va = step.transform(X_va)
+        for j, c in enumerate(tuning.C):
+            model = clf_mod.estimator(classifier, {**params, "C": c}, seed).fit(X_tr, y_train[tr])
+            scores[k, j] = _macro_f1(y_train[va], _probabilities(model, X_va))
+    mean = {c: float(m) for c, m in zip(tuning.C, scores.mean(axis=0))}
+    best = max(sorted(tuning.C), key=lambda c: (round(mean[c], 12), -c))
+    return best, mean
+
+
+def _fold(X, y, split, text, classifier, params, tfidf_settings, seed, want_terms, tuning):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        choice = None
+        if tuning is not None and tuning.applies(classifier):
+            best, inner = choose_c(X, y, split.train, text=text, classifier=classifier, params=params,
+                                   tfidf_settings=tfidf_settings, seed=seed, tuning=tuning)
+            params = {**params, "C": best}
+            choice = {"repeat": split.repeat, "fold": split.fold, "C": best,
+                      "inner_macro_f1": {str(c): round(s, 6) for c, s in inner.items()}}
+        pipe = fit_fold(X, y, split, text=text, classifier=classifier, params=params,
+                        tfidf_settings=tfidf_settings, seed=seed)
+        probs = _probabilities(pipe, _subset(X, split.test))
     terms = None
     if want_terms:
         names = pipe.named_steps["tfidf"].get_feature_names_out()
@@ -124,7 +205,7 @@ def _fold(X, y, split, text, classifier, params, tfidf_settings, seed, want_term
         clf_classes = list(pipe.named_steps["clf"].classes_)
         terms = (names, np.stack([coef[clf_classes.index(label)] for label in LABELS]))
     messages = [f"{w.category.__name__}: {str(w.message)[:200]}" for w in caught]
-    return split, probs, messages, terms
+    return split, probs, messages, terms, choice
 
 
 def _top_terms(fold_terms, n_folds: int, k: int = TOP_TERMS) -> dict[str, list[tuple[str, float, int]]]:
@@ -160,16 +241,18 @@ def fit_predict(
     seed: int = 42,
     n_jobs: int = 1,
     top_terms: bool = False,
+    tuning: Tuning | None = None,
 ) -> ModelResult:
     """Cross-validate one classifier on one representation (SPEC-M2-03 … -06).
 
     ``X`` holds plain texts (a list) when ``text`` is true, and a matrix otherwise, in
-    the order of ``y``. Each document gets one prediction per repeat.
+    the order of ``y``. Each document gets one prediction per repeat. With ``tuning``,
+    ``C`` is chosen inside each training fold (DEC-63 (b)).
     """
     y = np.asarray(y)
     n_repeats = max(s.repeat for s in splits) + 1
     want_terms = top_terms and text and classifier == "logreg"
-    args = (text, classifier, params, tfidf_settings, seed, want_terms)
+    args = (text, classifier, params, tfidf_settings, seed, want_terms, tuning)
     if n_jobs == 1:
         results = [_fold(X, y, s, *args) for s in splits]
     else:  # the folds are independent; each has its own fixed seed, so the result does not change
@@ -179,19 +262,28 @@ def fit_predict(
     probabilities = np.full((n_repeats, len(y), len(LABELS)), np.nan)
     folds = np.full((n_repeats, len(y)), -1, dtype=int)
     messages = collections.Counter()
-    fold_terms = []
-    for split, probs, msgs, terms in results:
+    fold_terms, choices = [], []
+    for split, probs, msgs, terms, choice in results:
         probabilities[split.repeat, split.test] = probs
         folds[split.repeat, split.test] = split.fold
         messages.update(msgs)
         if terms is not None:
             fold_terms.append(terms)
+        if choice is not None:
+            choices.append(choice)
     if (folds < 0).any():
         raise ValueError("a document was not tested in every repeat")
     return ModelResult(
         probabilities, folds, dict(sorted(messages.items())),
         _top_terms(fold_terms, len(splits)) if want_terms else None,
+        sorted(choices, key=lambda c: (c["repeat"], c["fold"])) or None,
     )
+
+
+def tuning_summary(choices: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """How often each C was chosen, and every fold's choice (the M2 report)."""
+    counts = collections.Counter(str(c["C"]) for c in choices)
+    return {"chosen_C": dict(sorted(counts.items(), key=lambda kv: float(kv[0]))), "folds": list(choices)}
 
 
 # --- Database run (SPEC-M2-01, -07) ---------------------------------------------------------
@@ -237,13 +329,15 @@ def run(
     l3_run_id: str,
     representations: Sequence[str] | None = None,
     classifiers: Sequence[str] | None = None,
+    tuning: bool | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> str:
     """Cross-validate the grid of representations × classifiers. Returns the run id.
 
     M2 refuses to start if a class is too small or a representation does not cover
     every document of the L3 run. A model run that fails is recorded without
-    predictions, and the others continue (SPEC-M2-07).
+    predictions, and the others continue (SPEC-M2-07). ``tuning`` False runs the
+    defaults (DEC-63 (a)) whatever ``train.tuning`` says.
     """
     runs.require_complete(conn, m1_run_id, "M1")
     runs.require_complete(conn, l3_run_id, "L3")
@@ -264,6 +358,9 @@ def run(
         clfs.append("majority")  # the baseline is in every comparison (DEC-25)
     overrides = settings.get("classifier_params") or {}
     params = {c: clf_mod.params(c, overrides.get(c)) for c in clfs}
+    tuned = Tuning.of(settings.get("tuning")) if tuning is not False else None
+    recorded = {c: {**p, "C": "tuned", "tuning": tuned.as_dict()} if tuned and tuned.applies(c) else p
+                for c, p in params.items()}
     tfidf = tfidf_settings_of((config_values.get("represent") or {}).get("tfidf"))
 
     features, problems = {}, []
@@ -286,7 +383,8 @@ def run(
         inputs.append(c1_run_id)
 
     snapshot = {**config_values, "m2_run": {"representations": reps, "classifiers": clfs, "cv": asdict(cv),
-                                            "classifier_params": params, "grouped_models": ["/".join(m) for m in grouped_models]}}
+                                            "classifier_params": recorded, "tuning": tuned.as_dict() if tuned else None,
+                                            "grouped_models": ["/".join(m) for m in grouped_models]}}
     run_id = runs.start(conn, "M2", snapshot, inputs=inputs)
     report_path = None
     try:
@@ -311,14 +409,14 @@ def run(
                     result = fit_predict(
                         features[rep], y, splits, text=rep == TFIDF, classifier=clf, params=params[clf],
                         tfidf_settings=tfidf, seed=cv.random_state, n_jobs=settings.get("n_jobs", 1),
-                        top_terms=scheme == STRATIFIED,
+                        top_terms=scheme == STRATIFIED, tuning=tuned,
                     )
                 except Exception as exc:  # reported; no predictions; the grid continues
                     duration = round(time.perf_counter() - started, 1)
                     with transaction(conn):
                         conn.execute(
                             "INSERT INTO model_runs VALUES (?, ?, ?, ?, 'failed', ?, NULL, ?, ?)",
-                            (run_id, scheme, rep, clf, json.dumps(params[clf], sort_keys=True), f"{type(exc).__name__}: {exc}", duration),
+                            (run_id, scheme, rep, clf, json.dumps(recorded[clf], sort_keys=True), f"{type(exc).__name__}: {exc}", duration),
                         )
                     grid.append({**entry, "status": "failed", "error": f"{type(exc).__name__}: {exc}", "duration_s": duration})
                     if progress:
@@ -328,7 +426,7 @@ def run(
                 with transaction(conn):
                     conn.execute(
                         "INSERT INTO model_runs VALUES (?, ?, ?, ?, 'complete', ?, ?, NULL, ?)",
-                        (run_id, scheme, rep, clf, json.dumps(params[clf], sort_keys=True),
+                        (run_id, scheme, rep, clf, json.dumps(recorded[clf], sort_keys=True),
                          json.dumps(result.warnings) if result.warnings else None, duration),
                     )
                     conn.executemany(
@@ -346,9 +444,11 @@ def run(
                              for label, terms in result.top_terms.items()
                              for rank, (term, weight, n) in enumerate(terms, start=1)],
                         )
-                grid.append({**entry, "status": "complete", "duration_s": duration, "warnings": result.warnings})
+                grid.append({**entry, "status": "complete", "duration_s": duration, "warnings": result.warnings,
+                             **({"tuning": tuning_summary(result.tuning)} if result.tuning else {})})
                 if progress:
-                    progress(f"{scheme} {rep}/{clf} {duration} s")
+                    chosen = f", C chosen {tuning_summary(result.tuning)['chosen_C']}" if result.tuning else ""
+                    progress(f"{scheme} {rep}/{clf} {duration} s{chosen}")
         if all(g["status"] == "failed" for g in grid):
             raise RuntimeError("every model run failed")
         report = {
@@ -359,7 +459,8 @@ def run(
             "test_fold_class_counts": fold_checks,
             "representations": reps,
             "classifiers": clfs,
-            "classifier_params": params,
+            "classifier_params": recorded,
+            "tuning": tuned.as_dict() if tuned else None,
             "tfidf": tfidf,
             "grid": grid,
             "failed": [g for g in grid if g["status"] == "failed"],
