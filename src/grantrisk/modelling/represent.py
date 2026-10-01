@@ -27,7 +27,7 @@ from grantrisk.store import files, runs
 from grantrisk.store.db import transaction
 
 TFIDF = "tfidf"
-REPRESENTATIONS = ("tfidf", "hubert", "e5", "bge_m3", "qwen3_8b")
+REPRESENTATIONS = ("tfidf", "hubert", "e5", "bge_m3", "bge_m3_512", "qwen3_8b")  # bge_m3_512: DEC-64 no. 5
 
 
 class BudgetReached(RuntimeError):

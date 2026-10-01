@@ -75,7 +75,7 @@ validate:                  # E1; the corpus LLM of SPEC-E1-06 is extract.llm.mod
     "GINOP Plusz-2.2.1-24": "GINOP Plusz-2.2.1-25"
 
 represent:                 # M1
-  representations: [tfidf, hubert, e5, bge_m3, qwen3_8b]
+  representations: [tfidf, hubert, e5, bge_m3, bge_m3_512, qwen3_8b]   # bge_m3_512: DEC-64 no. 5, exploratory
   tfidf:                   # SPEC-M1-05; fitted inside each training fold by M2
     lowercase: true
     token_pattern: '(?u)\b\w\w+\b'   # \w keeps the Hungarian letters
@@ -99,39 +99,61 @@ represent:                 # M1
       model_id: intfloat/multilingual-e5-large
       revision: 3d7cfbdacd47fdda877c5cd8a79fbcc4f2a574f3   # the snapshot in the local cache
       location: hosted     # DEC-24; locally only for the equivalence check
-      provider: null       # not chosen yet (M1 §6); a name under represent.providers
-      provider_model_id: null   # the provider's name for the model, if it differs
+      provider: deepinfra  # DEC-66
+      provider_model_id: intfloat/multilingual-e5-large
       pooling: mean
       prefix: "passage: "
-      input_limit: 512
+      input_limit: 512     # DeepInfra truncates longer inputs to 512 tokens
       normalize_chunks: true
       batch_size: 4
-      prices_per_mtok: {input: null}
+      max_chunks_per_request: 64
+      prices_per_mtok: {input: 0.010}   # DeepInfra, 2026-10-01
     bge_m3:
       model_id: BAAI/bge-m3
-      revision: null       # pin the commit when the tokenizer is downloaded (ARC-06)
+      revision: 5617a9f61b028005a4858fdac845db406aefb181   # the tokenizer snapshot of 2026-10-01 (ARC-06)
       location: hosted
-      provider: null
-      provider_model_id: null
+      provider: deepinfra
+      provider_model_id: BAAI/bge-m3
       pooling: cls
       prefix: ""
       input_limit: 8192
       normalize_chunks: true
-      prices_per_mtok: {input: null}
+      max_chunks_per_request: 8
+      prices_per_mtok: {input: 0.010}   # DeepInfra, 2026-10-01
+    bge_m3_512:            # the same model with 512-token chunks: the context-length axis (DEC-64 no. 5)
+      model_id: BAAI/bge-m3
+      revision: 5617a9f61b028005a4858fdac845db406aefb181
+      location: hosted
+      provider: deepinfra
+      provider_model_id: BAAI/bge-m3
+      pooling: cls
+      prefix: ""
+      input_limit: 512
+      normalize_chunks: true
+      max_chunks_per_request: 64
+      prices_per_mtok: {input: 0.010}
     qwen3_8b:
       model_id: Qwen/Qwen3-Embedding-8B
-      revision: null       # pin the commit when the tokenizer is downloaded (ARC-06)
+      revision: 1d8ad4ca9b3dd8059ad90a75d4983776a23d44af   # the tokenizer snapshot of 2026-10-01 (ARC-06)
       location: hosted
-      provider: null
-      provider_model_id: null
+      provider: deepinfra
+      provider_model_id: Qwen/Qwen3-Embedding-8B
       pooling: last_token
       prefix: ""           # no instruction for documents
       input_limit: 32768
       normalize_chunks: true
-      prices_per_mtok: {input: null}
-  providers: {}            # e.g. name: {api: openai_compatible, url: …/v1/embeddings, api_key_env: …,
-                           #             max_input_tokens: null, max_chunks_per_request: 16, margin_tokens: 8}
-  budget_usd: null         # the ceiling for hosted computation in one invocation (SPEC-M1-04)
+      max_chunks_per_request: 2   # chunks of up to 32K tokens: two per request
+      prices_per_mtok: {input: 0.010}   # DeepInfra, 2026-10-01
+  providers:
+    deepinfra:             # OpenAI-compatible embeddings API (DEC-45, DEC-66); the provider serves its own copy of the weights
+      api: openai_compatible
+      url: https://api.deepinfra.com/v1/openai/embeddings
+      api_key_env: DEEPINFRA_API_KEY
+      max_input_tokens: null
+      max_chunks_per_request: 16   # a model's own setting wins
+      margin_tokens: 8
+      timeout_s: 300
+  budget_usd: 5.0          # the ceiling for hosted computation in one invocation (SPEC-M1-04); about $1.5 expected
   max_retries: 5
   cache_index_batch: 32    # cache index rows written per batch (SPEC-M1-06)
   equivalence_check:       # SPEC-M1-07

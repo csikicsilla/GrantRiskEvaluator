@@ -98,7 +98,9 @@ class HostedEmbedder(Embedder):
         provider_limit = provider_settings.get("max_input_tokens")
         self.input_limit = min(model.get("input_limit", 512), provider_limit or 10**9)  # the tighter limit applies
         self.margin = provider_settings.get("margin_tokens", DEFAULT_MARGIN)
-        self.max_chunks_per_request = provider_settings.get("max_chunks_per_request", 16)
+        # chunks per request: the model's own setting wins (32K-token chunks need fewer than 512-token ones)
+        self.max_chunks_per_request = model.get("max_chunks_per_request") or provider_settings.get(
+            "max_chunks_per_request", 16)
         self.url = provider_settings["url"]
         self.api_key_env = provider_settings.get("api_key_env")
         self.timeout = provider_settings.get("timeout_s", 120)

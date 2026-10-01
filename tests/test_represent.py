@@ -165,6 +165,14 @@ def test_hosted_limit_is_the_tighter_one():
     assert emb.chunk_budget() == 10 - 2 - 1 - 1  # specials, "passage:", margin
 
 
+def test_a_models_own_chunks_per_request_win_over_the_providers():
+    model = {"model_id": "Qwen/Qwen3-Embedding-8B", "input_limit": 12, "max_chunks_per_request": 1}
+    settings = {"url": "https://example.invalid/v1/embeddings", "max_chunks_per_request": 16}
+    emb = hosted.HostedEmbedder("qwen3_8b", model, "p", settings, transport=FakeTransport(), tokenizer=FakeTokenizer())
+    assert emb.max_chunks_per_request == 1
+    assert hosted_embedder(FakeTransport()).max_chunks_per_request == 2  # the provider's, without a model setting
+
+
 def test_hosted_embedder_retries_temporary_failures():
     transport = FakeTransport([429, 503, 200])
     emb = hosted_embedder(transport)
